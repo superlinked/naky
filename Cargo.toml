@@ -1,0 +1,38 @@
+[workspace]
+members = [
+    "crates/av1-decoder",
+    "crates/naky",
+    "crates/perception",
+    "crates/ppocrv6-tiny-runtime",
+    "crates/screenevents",
+    "third_party/matroska-demuxer-0.8.1",
+    "third_party/ocrs-0.12.2",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.98"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.5.48", features = ["derive"] }
+libc = "0.2.183"
+matroska-demuxer = { path = "third_party/matroska-demuxer-0.8.1" }
+ocrs = { path = "third_party/ocrs-0.12.2" }
+rav1d = { version = "=1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+rten = { version = "=0.24.0", default-features = false, features = ["rten_format"] }
+rten-imageproc = "=0.24.0"
+rten-tensor = "=0.24.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+serde_yaml = "=0.9.34"
+sha2 = "0.10.9"
+thiserror = "2.0.18"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "deny"

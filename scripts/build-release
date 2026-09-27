@@ -1,0 +1,1534 @@
+#!/usr/bin/env python3
+"""Build the deterministic Linux x86_64 Näky release archive."""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import stat
+import struct
+import tarfile
+import tempfile
+import tomllib
+from pathlib import Path, PurePosixPath
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PUBLIC = ROOT
+MODEL_MANIFEST = ROOT / "manifests/ppocrv6-tiny-all-pp-bundle-v1.json"
+TARGET = "x86_64-unknown-linux-musl"
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+SOURCE_EXPORT_NAME = "SOURCE-EXPORT.json"
+SOURCE_EXPORT_SCHEMA = "naky.public-source-export.v1"
+SOURCE_TREE_SCHEMA = "naky.public-source-tree.v1"
+SOURCE_TREE_ALGORITHM = "sha256(canonical-json-public-source-tree-v1)"
+PRODUCT_SOURCE_SCHEMA = "naky.public-product-source.v1"
+PRODUCT_SOURCE_ALGORITHM = "sha256(canonical-json-public-product-source-v1)"
+PRODUCT_SOURCE_EXCLUSIONS = frozenset(
+    {
+        "evals/aggregate-results.json",
+        "evals/public-equivalence.json",
+        "evals/gui-world.html",
+    }
+)
+BUILD_RECEIPT_SCHEMA = "naky.public-static-build.v1"
+BUILD_CONTRACT = "naky-static-musl-v1"
+STATIC_STRIP_SCHEMA = "naky.public-static-strip.v1"
+EQUIVALENCE_SCHEMA = "naky.gui-world.public-equivalence.v1"
+EQUIVALENCE_STRIP_SCHEMA = "naky.release-binary-strip-derivation.v1"
+EQUIVALENCE_PROTOCOL = "naky-public-screen-preamble-only-v1"
+DATASET_REVISION = "7901fa3f0b9e36afa87d24ff9ecd48037c7fd6a0"
+EQUIVALENCE_RECORDS = 1819
+EVALUATED_PREAMBLE = {
+    "bytes": 21,
+    "sha256": "fa548f201fe310a23c8172b461f7456e279c43b8b5e6d449b46d1fcec6b33559",
+}
+PUBLIC_PREAMBLE = {
+    "bytes": 18,
+    "sha256": "d2f2108169733c05946da1e0e0fc47bf4b8c4011538690a0f45ee464fff8e820",
+}
+
+
+class ReleaseError(ValueError):
+    pass
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def regular_file(path: Path, label: str) -> os.stat_result:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise ReleaseError(f"cannot inspect {label}: {path}") from error
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+        raise ReleaseError(f"{label} is not a regular file: {path}")
+    return metadata
+
+
+def load_json(path: Path, label: str) -> object:
+    regular_file(path, label)
+    try:
+        return json.loads(path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseError(f"invalid {label}: {path}") from error
+
+
+def validate_identity(value: object, label: str) -> dict[str, object]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"bytes", "sha256"}
+        or not isinstance(value["bytes"], int)
+        or isinstance(value["bytes"], bool)
+        or value["bytes"] < 1
+        or not isinstance(value["sha256"], str)
+        or not SHA_RE.fullmatch(value["sha256"])
+    ):
+        raise ReleaseError(f"{label} identity differs")
+    return value
+
+
+def file_identity(path: Path, label: str) -> dict[str, object]:
+    data, _ = snapshot_file(path, label)
+    return data_identity(data)
+
+
+def data_identity(data: bytes) -> dict[str, object]:
+    if not data:
+        raise ReleaseError("release input is empty")
+    return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def snapshot_file(path: Path, label: str) -> tuple[bytes, int]:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise ReleaseError(f"cannot open {label}: {path}") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ReleaseError(f"{label} is not a regular file: {path}")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    state = lambda value: (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+    data = b"".join(chunks)
+    if state(before) != state(after) or len(data) != before.st_size:
+        raise ReleaseError(f"{label} changed while it was read")
+    if not data:
+        raise ReleaseError(f"{label} is empty")
+    return data, before.st_mode
+
+
+def json_snapshot(path: Path, label: str) -> tuple[object, bytes, dict[str, object]]:
+    data, _ = snapshot_file(path, label)
+    try:
+        value = json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseError(f"invalid {label}: {path}") from error
+    return value, data, data_identity(data)
+
+
+def closed_object(value: object, keys: set[str], label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReleaseError(f"{label} fields differ")
+    return value
+
+
+def validate_ordered_identity(
+    value: object, label: str, records: int
+) -> dict[str, object]:
+    row = closed_object(value, {"algorithm", "records", "bytes", "sha256"}, label)
+    if (
+        row["algorithm"] != "sha256(canonical-json-ordered-identities-v1)"
+        or row["records"] != records
+        or not isinstance(row["bytes"], int)
+        or isinstance(row["bytes"], bool)
+        or row["bytes"] < 0
+        or not isinstance(row["sha256"], str)
+        or not SHA_RE.fullmatch(row["sha256"])
+    ):
+        raise ReleaseError(f"{label} differs")
+    return row
+
+
+def ordered_identity(identities: list[dict[str, object]]) -> dict[str, object]:
+    members = [
+        {"bytes": row["bytes"], "sha256": row["sha256"]} for row in identities
+    ]
+    raw = json.dumps(
+        {"schema_version": "naky.ordered-file-identities.v1", "members": members},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode() + b"\n"
+    return {
+        "algorithm": "sha256(canonical-json-ordered-identities-v1)",
+        "records": len(members),
+        "bytes": sum(row["bytes"] for row in members),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def source_tree_identity(entries: list[dict[str, object]]) -> dict[str, object]:
+    raw = json.dumps(
+        {"schema_version": SOURCE_TREE_SCHEMA, "files": entries},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "algorithm": SOURCE_TREE_ALGORITHM,
+        "files": len(entries),
+        "bytes": sum(int(row["bytes"]) for row in entries),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def product_source_identity(entries: list[dict[str, object]]) -> dict[str, object]:
+    files = [row for row in entries if row["path"] not in PRODUCT_SOURCE_EXCLUSIONS]
+    raw = json.dumps(
+        {"schema_version": PRODUCT_SOURCE_SCHEMA, "files": files},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "algorithm": PRODUCT_SOURCE_ALGORITHM,
+        "files": len(files),
+        "bytes": sum(int(row["bytes"]) for row in files),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def validate_product_source(value: object, label: str) -> dict[str, object]:
+    row = closed_object(value, {"algorithm", "files", "bytes", "sha256"}, label)
+    if (
+        row["algorithm"] != PRODUCT_SOURCE_ALGORITHM
+        or not isinstance(row["files"], int)
+        or isinstance(row["files"], bool)
+        or row["files"] < 1
+        or not isinstance(row["bytes"], int)
+        or isinstance(row["bytes"], bool)
+        or row["bytes"] < 1
+        or not isinstance(row["sha256"], str)
+        or not SHA_RE.fullmatch(row["sha256"])
+    ):
+        raise ReleaseError(f"{label} differs")
+    return row
+
+
+def source_member(relative: str) -> Path:
+    member = PurePosixPath(relative)
+    if (
+        member.is_absolute()
+        or ".." in member.parts
+        or str(member) != relative
+        or not member.parts
+        or member.parts[0] in {".git", "target"}
+        or relative == SOURCE_EXPORT_NAME
+    ):
+        raise ReleaseError(f"unsafe source member path: {relative}")
+    return ROOT.joinpath(*member.parts)
+
+
+def git_mode_matches(mode: int, executable: bool) -> bool:
+    permissions = stat.S_IMODE(mode)
+    return permissions & 0o7000 == 0 and bool(permissions & 0o111) == executable
+
+
+def source_export_snapshot(
+) -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    bytes,
+    dict[str, tuple[bytes, int]],
+]:
+    receipt_path = ROOT / SOURCE_EXPORT_NAME
+    receipt_value, receipt_data, receipt_identity = json_snapshot(
+        receipt_path, "source export receipt"
+    )
+    receipt = closed_object(
+        receipt_value,
+        {"schema_version", "product_source", "source_tree", "files"},
+        "source export receipt",
+    )
+    if receipt["schema_version"] != SOURCE_EXPORT_SCHEMA:
+        raise ReleaseError("source export receipt schema differs")
+    rows = receipt["files"]
+    if not isinstance(rows, list) or not rows:
+        raise ReleaseError("source export file closure differs")
+    expected: set[str] = set()
+    snapshots: dict[str, tuple[bytes, int]] = {}
+    previous = ""
+    for row in rows:
+        row = closed_object(
+            row,
+            {"path", "bytes", "sha256", "executable"},
+            "source export file",
+        )
+        relative = row["path"]
+        if not isinstance(relative, str) or relative <= previous:
+            raise ReleaseError("source export paths are not strictly ordered")
+        previous = relative
+        if relative in expected:
+            raise ReleaseError("source export path is duplicated")
+        path = source_member(relative)
+        data, mode = snapshot_file(path, f"source export member {relative}")
+        if (
+            not isinstance(row["bytes"], int)
+            or isinstance(row["bytes"], bool)
+            or row["bytes"] < 1
+            or not isinstance(row["sha256"], str)
+            or not SHA_RE.fullmatch(row["sha256"])
+            or not isinstance(row["executable"], bool)
+            or len(data) != row["bytes"]
+            or data_identity(data)["sha256"] != row["sha256"]
+            or not git_mode_matches(mode, row["executable"])
+        ):
+            raise ReleaseError(f"source export member identity differs: {relative}")
+        expected.add(relative)
+        snapshots[relative] = (data, mode)
+    tree = source_tree_identity(rows)
+    product_source = product_source_identity(rows)
+    if receipt["source_tree"] != tree or receipt["product_source"] != product_source:
+        raise ReleaseError("source export tree identity differs")
+    actual: set[str] = set()
+    for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT).as_posix()
+        first = PurePosixPath(relative).parts[0]
+        if first in {".git", "target"} or relative == SOURCE_EXPORT_NAME:
+            continue
+        if path.is_symlink():
+            raise ReleaseError(f"source export contains a symlink: {relative}")
+        if path.is_file():
+            actual.add(relative)
+    if actual != expected:
+        raise ReleaseError("source export file closure differs")
+    return receipt_identity, tree, product_source, receipt_data, snapshots
+
+
+def authenticate_source_export() -> tuple[dict[str, object], dict[str, object]]:
+    receipt_identity, tree, _, _, _ = source_export_snapshot()
+    return receipt_identity, tree
+
+
+def authenticate_build_receipt(
+    path: Path,
+    *,
+    source_export: dict[str, object],
+    source_tree: dict[str, object],
+    product_source: dict[str, object],
+    binary: dict[str, object],
+) -> dict[str, object]:
+    receipt_value, _, receipt_identity = json_snapshot(path, "static build receipt")
+    validate_build_receipt(
+        receipt_value,
+        source_export=source_export,
+        source_tree=source_tree,
+        product_source=product_source,
+        binary=binary,
+    )
+    return receipt_identity
+
+
+def validate_build_receipt(
+    value: object,
+    *,
+    source_export: dict[str, object],
+    source_tree: dict[str, object],
+    product_source: dict[str, object],
+    binary: dict[str, object],
+) -> None:
+    receipt = closed_object(
+        value,
+        {
+            "schema_version",
+            "build_contract",
+            "target",
+            "profile",
+            "source_export",
+            "source_tree",
+            "product_source",
+            "toolchain",
+            "unstripped_binary",
+            "normalization",
+            "binary",
+        },
+        "static build receipt",
+    )
+    if (
+        receipt["schema_version"] != BUILD_RECEIPT_SCHEMA
+        or receipt["build_contract"] != BUILD_CONTRACT
+        or receipt["target"] != TARGET
+        or receipt["profile"] != "release"
+        or validate_identity(receipt["source_export"], "build source export")
+        != source_export
+        or receipt["source_tree"] != source_tree
+        or validate_product_source(receipt["product_source"], "build product source")
+        != product_source
+        or not isinstance(receipt["toolchain"], dict)
+        or set(receipt["toolchain"]) != {"cargo", "rustc"}
+        or validate_identity(receipt["binary"], "build binary") != binary
+    ):
+        raise ReleaseError("static build receipt does not match the release inputs")
+    for name in ("cargo", "rustc"):
+        tool = closed_object(
+            receipt["toolchain"][name], {"version", "output"}, f"{name} toolchain"
+        )
+        if (
+            not isinstance(tool["version"], str)
+            or not tool["version"]
+            or validate_identity(tool["output"], f"{name} version output")["bytes"] < 1
+        ):
+            raise ReleaseError(f"{name} toolchain identity differs")
+    unstripped = validate_identity(
+        receipt["unstripped_binary"], "unstripped build binary"
+    )
+    normalization = closed_object(
+        receipt["normalization"],
+        {
+            "schema_version",
+            "operation",
+            "tool",
+            "arguments",
+            "deterministic_replays",
+            "input",
+            "output",
+        },
+        "static binary normalization",
+    )
+    strip_tool = closed_object(
+        normalization["tool"], {"name", "version", "binary"}, "strip tool"
+    )
+    if (
+        normalization["schema_version"] != STATIC_STRIP_SCHEMA
+        or normalization["operation"] != "gnu-strip-all"
+        or normalization["arguments"]
+        != ["--strip-all", "<unstripped-binary-copy>"]
+        or normalization["deterministic_replays"] != 2
+        or validate_identity(normalization["input"], "normalization input")
+        != unstripped
+        or validate_identity(normalization["output"], "normalization output")
+        != binary
+        or strip_tool["name"] != "GNU strip"
+        or not isinstance(strip_tool["version"], str)
+        or not strip_tool["version"].startswith("GNU strip (GNU Binutils")
+        or validate_identity(strip_tool["binary"], "strip tool binary")["bytes"]
+        < 1
+    ):
+        raise ReleaseError("static binary normalization differs")
+
+
+def validate_aggregate(value: object) -> dict[str, object]:
+    keys = {
+        "schema_version", "status", "dataset", "reader_policy", "screenshot_policy",
+        "product_source", "product", "cohorts", "results", "limitations",
+    }
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReleaseError("evaluation aggregate fields differ")
+    if value["schema_version"] != "naky.public-eval-aggregate.v1" or value["status"] != "complete":
+        raise ReleaseError("evaluation aggregate is not complete")
+    validate_product_source(value["product_source"], "evaluation aggregate product source")
+    if value["dataset"] != {
+        "name": "ONE-Lab/GUI-World",
+        "revision": "7901fa3f0b9e36afa87d24ff9ecd48037c7fd6a0",
+        "split": "benchmark",
+    }:
+        raise ReleaseError("evaluation aggregate dataset differs")
+    if value["reader_policy"] != {
+        "model": "gpt-6-luna", "reasoning_effort": "low", "max_output_tokens": 16384,
+        "image_detail": "high", "service_tier": "high", "store": False, "trials": 3,
+    }:
+        raise ReleaseError("evaluation aggregate reader policy differs")
+    if value["screenshot_policy"] != {
+        "frames": 20, "long_edge_pixels": 768,
+        "sampling": "nearest-equal-presentation-duration-bin-midpoint",
+    }:
+        raise ReleaseError("evaluation aggregate screenshot policy differs")
+    product = value["product"]
+    product_keys = {
+        "scored_binary_sha256",
+        "equivalence_execution_binary",
+        "release_binary",
+        "model_manifest",
+        "model_archive",
+        "equivalence_receipt",
+    }
+    if not isinstance(product, dict) or set(product) != product_keys:
+        raise ReleaseError("evaluation aggregate product identity fields differ")
+    if (
+        not isinstance(product["scored_binary_sha256"], str)
+        or not SHA_RE.fullmatch(product["scored_binary_sha256"])
+    ):
+        raise ReleaseError("evaluation aggregate scored binary identity differs")
+    for name in sorted(product_keys - {"scored_binary_sha256"}):
+        validate_identity(product[name], f"public product {name}")
+    cohorts = value["cohorts"]
+    results = value["results"]
+    limitations = value["limitations"]
+    if not isinstance(cohorts, list) or not 1 <= len(cohorts) <= 16:
+        raise ReleaseError("evaluation aggregate cohort count differs")
+    if not isinstance(results, list) or not 1 <= len(results) <= 256:
+        raise ReleaseError("evaluation aggregate result count differs")
+    if not isinstance(limitations, list) or not 1 <= len(limitations) <= 16 or not all(
+        isinstance(item, str) and 1 <= len(item) <= 500 for item in limitations
+    ):
+        raise ReleaseError("evaluation aggregate limitations differ")
+    cohort_keys = {"id", "definition", "records", "valid_tasks", "media_clusters"}
+    cohort_ids: set[str] = set()
+    for cohort in cohorts:
+        if not isinstance(cohort, dict) or set(cohort) != cohort_keys:
+            raise ReleaseError("evaluation aggregate cohort fields differ")
+        if (
+            not isinstance(cohort["id"], str)
+            or re.fullmatch(r"[a-z0-9-]+", cohort["id"]) is None
+            or cohort["id"] in cohort_ids
+        ):
+            raise ReleaseError("evaluation aggregate cohort ID differs")
+        cohort_ids.add(cohort["id"])
+        if not isinstance(cohort["definition"], str) or not 1 <= len(cohort["definition"]) <= 500:
+            raise ReleaseError("evaluation aggregate cohort definition differs")
+        for name in ("records", "valid_tasks", "media_clusters"):
+            if not isinstance(cohort[name], int) or isinstance(cohort[name], bool) or cohort[name] < 0:
+                raise ReleaseError(f"evaluation aggregate cohort {name} differs")
+    result_required = {"cohort", "slice", "metric", "value", "sample_size", "unit"}
+    result_optional = {"ci95_low", "ci95_high"}
+    result_ids: set[tuple[str, str, str]] = set()
+    for result in results:
+        if not isinstance(result, dict) or not result_required <= set(result) or set(result) - result_required - result_optional:
+            raise ReleaseError("evaluation aggregate result fields differ")
+        if result["cohort"] not in cohort_ids:
+            raise ReleaseError("evaluation aggregate result cohort differs")
+        if not isinstance(result["slice"], str) or not 1 <= len(result["slice"]) <= 100:
+            raise ReleaseError("evaluation aggregate result slice differs")
+        if not isinstance(result["metric"], str) or re.fullmatch(r"[a-z0-9-]+", result["metric"]) is None:
+            raise ReleaseError("evaluation aggregate result metric differs")
+        identity = (result["cohort"], result["slice"], result["metric"])
+        if identity in result_ids:
+            raise ReleaseError("evaluation aggregate result identity differs")
+        result_ids.add(identity)
+        if (
+            not isinstance(result["value"], (int, float))
+            or isinstance(result["value"], bool)
+            or not math.isfinite(float(result["value"]))
+        ):
+            raise ReleaseError("evaluation aggregate result value differs")
+        if not isinstance(result["sample_size"], int) or isinstance(result["sample_size"], bool) or result["sample_size"] < 0:
+            raise ReleaseError("evaluation aggregate result sample size differs")
+        if not isinstance(result["unit"], str) or len(result["unit"]) > 32:
+            raise ReleaseError("evaluation aggregate result unit differs")
+        interval_fields = {"ci95_low", "ci95_high"} & set(result)
+        if interval_fields not in (set(), {"ci95_low", "ci95_high"}):
+            raise ReleaseError("evaluation aggregate result interval differs")
+        if any(
+            not isinstance(result[name], (int, float))
+            or isinstance(result[name], bool)
+            or not math.isfinite(float(result[name]))
+            for name in interval_fields
+        ):
+            raise ReleaseError("evaluation aggregate result interval differs")
+    return value
+
+
+def validate_product_bindings(
+    aggregate: dict[str, object], expected: dict[str, object]
+) -> None:
+    if aggregate["product"] != expected:
+        raise ReleaseError("evaluation aggregate product identities do not match release inputs")
+
+
+def validate_release_version(
+    source_files: dict[str, tuple[bytes, int]], version: str
+) -> None:
+    manifests = (
+        "crates/av1-decoder/Cargo.toml",
+        "crates/naky/Cargo.toml",
+        "crates/perception/Cargo.toml",
+        "crates/ppocrv6-tiny-runtime/Cargo.toml",
+        "crates/screenevents/Cargo.toml",
+    )
+    for relative in manifests:
+        data = source_files.get(relative, (None,))[0]
+        if not isinstance(data, bytes):
+            raise ReleaseError(f"release crate manifest is absent: {relative}")
+        try:
+            manifest = tomllib.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+            raise ReleaseError(f"release crate manifest is invalid: {relative}") from error
+        package = manifest.get("package")
+        if not isinstance(package, dict) or package.get("version") != version:
+            raise ReleaseError(f"release version differs from {relative}")
+
+
+def validate_comparison_report(data: bytes, aggregate_sha256: str) -> None:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError as error:
+        raise ReleaseError("comparison report is not UTF-8") from error
+    if "<html" not in text[:1024].lower():
+        raise ReleaseError("comparison report is not HTML")
+    marker = (
+        f'<meta name="naky-aggregate-sha256" content="{aggregate_sha256}">'
+    )
+    if text.count(marker) != 1 or text.count("naky-aggregate-sha256") != 1:
+        raise ReleaseError("comparison report aggregate binding differs")
+
+
+def spdx_id(name: str, version: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9.-]", "-", f"{name}-{version}")
+    return f"SPDXRef-Package-{value}"
+
+
+def audited_dependency_licenses(
+    source_files: dict[str, tuple[bytes, int]],
+) -> list[dict[str, str]]:
+    data = source_files.get("dependency-licenses.json", (None,))[0]
+    if not isinstance(data, bytes):
+        raise ReleaseError("dependency license manifest is absent from the staged source")
+    try:
+        manifest = json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseError("dependency license manifest is invalid") from error
+    manifest = closed_object(
+        manifest,
+        {"schema_version", "target", "packages"},
+        "dependency license manifest",
+    )
+    if (
+        manifest["schema_version"] != "naky.dependency-licenses.v1"
+        or manifest["target"] != TARGET
+        or not isinstance(manifest["packages"], list)
+    ):
+        raise ReleaseError("dependency license manifest contract differs")
+    packages: list[dict[str, str]] = []
+    identities: set[tuple[str, str]] = set()
+    for value in manifest["packages"]:
+        package = closed_object(
+            value,
+            {"name", "version", "licenseDeclared", "licenseConcluded"},
+            "dependency license manifest package",
+        )
+        if not all(isinstance(package[field], str) and package[field] for field in package):
+            raise ReleaseError("dependency license manifest package value differs")
+        identity = (package["name"], package["version"])
+        if identity in identities:
+            raise ReleaseError("dependency license manifest contains a duplicate package")
+        identities.add(identity)
+        packages.append(package)
+    if packages != sorted(packages, key=lambda row: (row["name"], row["version"])):
+        raise ReleaseError("dependency license manifest package order differs")
+    return packages
+
+
+def validate_sbom(
+    value: object,
+    data: bytes,
+    *,
+    source_files: dict[str, tuple[bytes, int]],
+    version: str,
+    product_source_sha256: str,
+) -> None:
+    document = closed_object(
+        value,
+        {
+            "spdxVersion",
+            "dataLicense",
+            "SPDXID",
+            "name",
+            "documentNamespace",
+            "creationInfo",
+            "packages",
+            "relationships",
+        },
+        "SPDX SBOM",
+    )
+    expected_header = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"naky-{version}",
+        "documentNamespace": (
+            "https://github.com/superlinked/naky/releases/"
+            f"download/v{version}/sbom-{product_source_sha256}"
+        ),
+        "creationInfo": {
+            "created": "1970-01-01T00:00:00Z",
+            "creators": ["Tool: naky-generate-sbom-v1"],
+        },
+    }
+    if any(document[name] != expected for name, expected in expected_header.items()):
+        raise ReleaseError("SPDX SBOM document metadata differs")
+    lock_data = source_files.get("Cargo.lock", (None,))[0]
+    if not isinstance(lock_data, bytes):
+        raise ReleaseError("Cargo.lock is absent from the staged source")
+    try:
+        lock = tomllib.loads(lock_data.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ReleaseError("staged Cargo.lock is invalid") from error
+    locked_packages = lock.get("package")
+    if not isinstance(locked_packages, list) or not locked_packages:
+        raise ReleaseError("staged Cargo.lock package closure differs")
+    locked_identities: set[tuple[str, str]] = set()
+    for package in locked_packages:
+        if not isinstance(package, dict):
+            raise ReleaseError("staged Cargo.lock package closure differs")
+        name = package.get("name")
+        package_version = package.get("version")
+        if not isinstance(name, str) or not isinstance(package_version, str):
+            raise ReleaseError("staged Cargo.lock package closure differs")
+        locked_identities.add((name, package_version))
+    expected_packages = audited_dependency_licenses(source_files)
+    if any(
+        (package["name"], package["version"]) not in locked_identities
+        for package in expected_packages
+    ):
+        raise ReleaseError("dependency license manifest package is absent from Cargo.lock")
+    packages = document["packages"]
+    if not isinstance(packages, list) or len(packages) != len(expected_packages):
+        raise ReleaseError("SPDX SBOM package closure differs")
+    identifiers: list[str] = []
+    for row, audited in zip(packages, expected_packages, strict=True):
+        name = audited["name"]
+        package_version = audited["version"]
+        package = closed_object(
+            row,
+            {
+                "SPDXID",
+                "name",
+                "versionInfo",
+                "downloadLocation",
+                "filesAnalyzed",
+                "licenseConcluded",
+                "licenseDeclared",
+                "copyrightText",
+                "externalRefs",
+            },
+            "SPDX SBOM package",
+        )
+        identifier = spdx_id(name, package_version)
+        expected = {
+            "SPDXID": identifier,
+            "name": name,
+            "versionInfo": package_version,
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": False,
+            "copyrightText": "NOASSERTION",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE-MANAGER",
+                    "referenceType": "purl",
+                    "referenceLocator": f"pkg:cargo/{name}@{package_version}",
+                }
+            ],
+        }
+        if any(package[field] != field_value for field, field_value in expected.items()):
+            raise ReleaseError("SPDX SBOM package metadata differs")
+        if (
+            package["licenseDeclared"],
+            package["licenseConcluded"],
+        ) != (
+            audited["licenseDeclared"],
+            audited["licenseConcluded"],
+        ):
+            raise ReleaseError("SPDX SBOM package license differs")
+        identifiers.append(identifier)
+    expected_relationships = [
+        {
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relationshipType": "DESCRIBES",
+            "relatedSpdxElement": identifier,
+        }
+        for identifier in identifiers
+    ]
+    if document["relationships"] != expected_relationships:
+        raise ReleaseError("SPDX SBOM relationship closure differs")
+    try:
+        canonical = (
+            json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            + "\n"
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise ReleaseError("SPDX SBOM is not canonical JSON") from error
+    if data != canonical:
+        raise ReleaseError("SPDX SBOM is not canonical JSON")
+
+
+def validate_equivalence_receipt(
+    value: object,
+    *,
+    receipt_identity: dict[str, object],
+    binary_identity: dict[str, object],
+    model_manifest_identity: dict[str, object],
+    model_archive_identity: dict[str, object],
+    model_members_identity: dict[str, object],
+    model_bundle_id: str,
+) -> None:
+    receipt = closed_object(
+        value,
+        {
+            "schema_version",
+            "status",
+            "corpus",
+            "evaluated_product",
+            "public_product",
+            "protocol",
+            "comparison",
+            "execution",
+            "reconciliation",
+        },
+        "public equivalence receipt",
+    )
+    if (
+        receipt["schema_version"] != EQUIVALENCE_SCHEMA
+        or receipt["status"] != "protocol-match"
+    ):
+        raise ReleaseError("public equivalence receipt is not a protocol match")
+    corpus = closed_object(
+        receipt["corpus"],
+        {
+            "dataset",
+            "revision",
+            "records",
+            "source_manifest",
+            "canonical_manifest",
+            "canonical_media",
+        },
+        "public equivalence corpus",
+    )
+    records = corpus["records"]
+    if (
+        corpus["dataset"] != "ONE-Lab/GUI-World"
+        or corpus["revision"] != DATASET_REVISION
+        or not isinstance(records, int)
+        or isinstance(records, bool)
+        or records != EQUIVALENCE_RECORDS
+    ):
+        raise ReleaseError("public equivalence corpus differs")
+    validate_identity(corpus["source_manifest"], "equivalence source manifest")
+    validate_identity(corpus["canonical_manifest"], "equivalence canonical manifest")
+    validate_ordered_identity(corpus["canonical_media"], "equivalence canonical media", records)
+
+    evaluated = closed_object(
+        receipt["evaluated_product"],
+        {
+            "manifest",
+            "binary_sha256",
+            "events",
+            "stateful_text",
+            "stateful_text_body",
+        },
+        "equivalence evaluated product",
+    )
+    validate_identity(evaluated["manifest"], "evaluated product manifest")
+    if not isinstance(evaluated["binary_sha256"], str) or not SHA_RE.fullmatch(
+        evaluated["binary_sha256"]
+    ):
+        raise ReleaseError("evaluated product binary identity differs")
+    evaluated_events = validate_ordered_identity(
+        evaluated["events"], "evaluated events", records
+    )
+    evaluated_screen = validate_ordered_identity(
+        evaluated["stateful_text"], "evaluated screen text", records
+    )
+    evaluated_body = validate_ordered_identity(
+        evaluated["stateful_text_body"], "evaluated screen body", records
+    )
+
+    public = closed_object(
+        receipt["public_product"],
+        {
+            "evaluated_execution_binary",
+            "release_binary",
+            "binary_derivation",
+            "model_bundle",
+            "events",
+            "screen",
+            "screen_body",
+        },
+        "equivalence public product",
+    )
+    execution_binary = validate_identity(
+        public["evaluated_execution_binary"], "equivalence execution binary"
+    )
+    release_binary = validate_identity(
+        public["release_binary"], "equivalence release binary"
+    )
+    if release_binary != binary_identity:
+        raise ReleaseError("equivalence binary does not match the release binary")
+    derivation = closed_object(
+        public["binary_derivation"],
+        {
+            "schema_version",
+            "evaluated_execution_binary",
+            "release_binary",
+            "operation",
+            "evaluation_execution",
+            "release_execution",
+        },
+        "equivalence release binary derivation",
+    )
+    operation = closed_object(
+        derivation["operation"],
+        {"tool", "arguments", "deterministic_replays", "replay_output"},
+        "equivalence strip operation",
+    )
+    strip_tool = closed_object(
+        operation["tool"], {"name", "version", "binary"}, "equivalence strip tool"
+    )
+    if (
+        derivation["schema_version"] != EQUIVALENCE_STRIP_SCHEMA
+        or validate_identity(
+            derivation["evaluated_execution_binary"],
+            "derived execution binary",
+        )
+        != execution_binary
+        or validate_identity(derivation["release_binary"], "derived release binary")
+        != release_binary
+        or operation["arguments"]
+        != ["--strip-all", "<evaluated-execution-binary-copy>"]
+        or operation["deterministic_replays"] != 2
+        or validate_identity(operation["replay_output"], "strip replay output")
+        != release_binary
+        or strip_tool["name"] != "GNU strip"
+        or not isinstance(strip_tool["version"], str)
+        or not strip_tool["version"].startswith("GNU strip (GNU Binutils")
+        or validate_identity(strip_tool["binary"], "equivalence strip binary")[
+            "bytes"
+        ]
+        < 1
+        or closed_object(
+            derivation["evaluation_execution"],
+            {"binary", "records"},
+            "equivalence execution claim",
+        )
+        != {"binary": "evaluated_execution_binary", "records": records}
+        or closed_object(
+            derivation["release_execution"],
+            {"binary", "full_evaluation_executed"},
+            "release execution claim",
+        )
+        != {"binary": "release_binary", "full_evaluation_executed": False}
+    ):
+        raise ReleaseError("equivalence release binary derivation differs")
+    bundle = closed_object(
+        public["model_bundle"],
+        {"manifest", "bundle_id", "archive", "members"},
+        "equivalence public model bundle",
+    )
+    if validate_identity(bundle["manifest"], "public model manifest") != model_manifest_identity:
+        raise ReleaseError("equivalence model manifest does not match the release manifest")
+    if validate_identity(bundle["archive"], "public model archive") != model_archive_identity:
+        raise ReleaseError("equivalence model archive does not match the release archive")
+    if bundle["bundle_id"] != model_bundle_id:
+        raise ReleaseError("equivalence model bundle ID differs")
+    if (
+        validate_ordered_identity(bundle["members"], "public model members", 7)
+        != model_members_identity
+    ):
+        raise ReleaseError("equivalence model members do not match the release bundle")
+    public_events = validate_ordered_identity(public["events"], "public events", records)
+    public_screen = validate_ordered_identity(public["screen"], "public screen text", records)
+    public_body = validate_ordered_identity(
+        public["screen_body"], "public screen body", records
+    )
+    if (
+        public_events != evaluated_events
+        or public_screen == evaluated_screen
+        or public_body != evaluated_body
+    ):
+        raise ReleaseError("public equivalence aggregate identities differ")
+
+    protocol = closed_object(
+        receipt["protocol"], {"id", "events", "screen"}, "public equivalence protocol"
+    )
+    if protocol["id"] != EQUIVALENCE_PROTOCOL:
+        raise ReleaseError("public equivalence protocol differs")
+    if closed_object(protocol["events"], {"comparison"}, "event protocol") != {
+        "comparison": "literal-byte-equality"
+    }:
+        raise ReleaseError("event comparison protocol differs")
+    screen_protocol = closed_object(
+        protocol["screen"],
+        {"comparison", "evaluated_preamble", "public_preamble"},
+        "screen protocol",
+    )
+    if screen_protocol["comparison"] != "literal-byte-equality-after-first-newline":
+        raise ReleaseError("screen comparison protocol differs")
+    for name, expected in (
+        ("evaluated_preamble", EVALUATED_PREAMBLE),
+        ("public_preamble", PUBLIC_PREAMBLE),
+    ):
+        preamble = closed_object(
+            screen_protocol[name], {"bytes", "sha256", "records"}, f"{name} identity"
+        )
+        if (
+            {key: preamble[key] for key in ("bytes", "sha256")} != expected
+            or preamble["records"] != records
+        ):
+            raise ReleaseError(f"{name} identity differs")
+
+    comparison = closed_object(
+        receipt["comparison"],
+        {
+            "records",
+            "protocol_exact_records",
+            "protocol_mismatch_records",
+            "events_byte_exact_records",
+            "events_mismatch_records",
+            "screen_body_byte_exact_records",
+            "screen_body_mismatch_records",
+            "mismatches",
+        },
+        "public equivalence comparison",
+    )
+    if comparison != {
+        "records": records,
+        "protocol_exact_records": records,
+        "protocol_mismatch_records": 0,
+        "events_byte_exact_records": records,
+        "events_mismatch_records": 0,
+        "screen_body_byte_exact_records": records,
+        "screen_body_mismatch_records": 0,
+        "mismatches": [],
+    }:
+        raise ReleaseError("public equivalence comparison is incomplete")
+    execution = closed_object(
+        receipt["execution"],
+        {
+            "base_host_workers",
+            "base_host_records",
+            "replacement_host_workers",
+            "replacement_host_records",
+            "rten_threads_per_process",
+            "provider_calls",
+        },
+        "public equivalence execution",
+    )
+    if (
+        not isinstance(execution["base_host_workers"], int)
+        or isinstance(execution["base_host_workers"], bool)
+        or execution["base_host_workers"] < 1
+        or execution["base_host_records"] != records - 4
+        or not isinstance(execution["replacement_host_workers"], int)
+        or isinstance(execution["replacement_host_workers"], bool)
+        or execution["replacement_host_workers"] < 1
+        or execution["replacement_host_records"] != 4
+        or execution["rten_threads_per_process"] != 2
+        or execution["provider_calls"] != 0
+    ):
+        raise ReleaseError("public equivalence execution differs")
+    reconciliation = closed_object(
+        receipt["reconciliation"],
+        {
+            "base_equivalence_receipt",
+            "avx2_execution_manifest",
+            "avx2_comparison_receipt",
+            "effective_slot_sources",
+            "replacement_slots",
+            "replacement_execution",
+            "replacement_records",
+            "cross_isa_variance",
+        },
+        "mixed-host reconciliation",
+    )
+    for name in (
+        "base_equivalence_receipt",
+        "avx2_execution_manifest",
+        "avx2_comparison_receipt",
+    ):
+        validate_identity(reconciliation[name], name.replace("_", " "))
+    slots = reconciliation["replacement_slots"]
+    replacements = reconciliation["replacement_execution"]
+    if (
+        not isinstance(slots, list)
+        or len(slots) != 4
+        or len(set(slots)) != 4
+        or not all(isinstance(slot, int) and not isinstance(slot, bool) for slot in slots)
+        or not isinstance(replacements, list)
+        or len(replacements) != 4
+    ):
+        raise ReleaseError("mixed-host replacement set differs")
+    for slot, replacement in zip(slots, replacements, strict=True):
+        replacement = closed_object(
+            replacement,
+            {
+                "slot",
+                "record_id",
+                "source_result",
+                "host_isa",
+                "kernel",
+                "wrapper",
+                "rten_threads",
+                "wall_seconds",
+                "input",
+                "binary",
+                "model_manifest",
+                "evaluated",
+                "outputs",
+                "comparison",
+            },
+            "mixed-host replacement",
+        )
+        if (
+            replacement["slot"] != slot
+            or not isinstance(replacement["record_id"], str)
+            or not replacement["record_id"]
+            or validate_identity(replacement["binary"], "replacement binary")
+            != execution_binary
+            or validate_identity(
+                replacement["model_manifest"], "replacement model manifest"
+            )
+            != model_manifest_identity
+            or replacement["rten_threads"] != 2
+            or replacement["comparison"]
+            != {"events_byte_exact": True, "screen_body_byte_exact": True}
+        ):
+            raise ReleaseError("mixed-host replacement binding differs")
+    slot_sources = closed_object(
+        reconciliation["effective_slot_sources"],
+        {"algorithm", "records", "sha256"},
+        "effective slot sources",
+    )
+    replacement_records = closed_object(
+        reconciliation["replacement_records"],
+        {"algorithm", "records", "sha256"},
+        "replacement record aggregate",
+    )
+    if (
+        slot_sources["records"] != records
+        or not isinstance(slot_sources["sha256"], str)
+        or not SHA_RE.fullmatch(slot_sources["sha256"])
+        or replacement_records["records"] != 4
+        or not isinstance(replacement_records["sha256"], str)
+        or not SHA_RE.fullmatch(replacement_records["sha256"])
+        or not isinstance(reconciliation["cross_isa_variance"], dict)
+    ):
+        raise ReleaseError("mixed-host reconciliation binding differs")
+    if receipt_identity["bytes"] < 1:
+        raise ReleaseError("public equivalence receipt identity differs")
+
+
+def check_publication_gates(aggregate_path: Path) -> dict[str, object]:
+    aggregate = load_json(aggregate_path, "evaluation aggregate")
+    return validate_aggregate(aggregate)
+
+
+def authenticate_binary(path: Path) -> dict[str, object]:
+    data, mode = snapshot_file(path, "release binary")
+    return authenticate_binary_data(data, mode)
+
+
+def authenticate_binary_data(data: bytes, mode: int) -> dict[str, object]:
+    if stat.S_IMODE(mode) != 0o755:
+        raise ReleaseError("release binary is not executable")
+    if len(data) < 64 or data[:6] != b"\x7fELF\x02\x01":
+        raise ReleaseError("release binary is not a 64-bit little-endian ELF")
+    if struct.unpack_from("<H", data, 16)[0] != 3:
+        raise ReleaseError("release binary is not a position-independent ET_DYN ELF")
+    if struct.unpack_from("<H", data, 18)[0] != 62:
+        raise ReleaseError("release binary is not x86_64")
+    phoff = struct.unpack_from("<Q", data, 32)[0]
+    phentsize = struct.unpack_from("<H", data, 54)[0]
+    phnum = struct.unpack_from("<H", data, 56)[0]
+    if phentsize < 56 or phoff + phentsize * phnum > len(data):
+        raise ReleaseError("release binary has an invalid program-header table")
+    for index in range(phnum):
+        header = phoff + phentsize * index
+        program_type = struct.unpack_from("<I", data, header)[0]
+        if program_type == 3:
+            raise ReleaseError("release binary has a dynamic ELF interpreter")
+        if program_type != 2:
+            continue
+        dynamic_offset = struct.unpack_from("<Q", data, header + 8)[0]
+        dynamic_size = struct.unpack_from("<Q", data, header + 32)[0]
+        if dynamic_offset + dynamic_size > len(data) or dynamic_size % 16:
+            raise ReleaseError("release binary has an invalid dynamic table")
+        for entry in range(dynamic_offset, dynamic_offset + dynamic_size, 16):
+            tag = struct.unpack_from("<q", data, entry)[0]
+            if tag == 0:
+                break
+            if tag == 1:
+                raise ReleaseError("release binary declares a needed shared library")
+        else:
+            raise ReleaseError("release binary dynamic table has no terminator")
+    return data_identity(data)
+
+
+def safe_member(root: Path, relative: str) -> Path:
+    member = PurePosixPath(relative)
+    if member.is_absolute() or ".." in member.parts or str(member) != relative:
+        raise ReleaseError(f"unsafe model member path: {relative}")
+    return root.joinpath(*member.parts)
+
+
+def authenticate_model_bundle(root: Path, manifest: dict[str, object]) -> list[tuple[str, bytes]]:
+    if not root.is_dir() or root.is_symlink():
+        raise ReleaseError("model bundle is not a real directory")
+    members = manifest.get("members")
+    if not isinstance(members, list) or len(members) != 7:
+        raise ReleaseError("model manifest member contract differs")
+    expected: list[tuple[str, bytes]] = []
+    roles: set[str] = set()
+    paths: set[str] = set()
+    for row in members:
+        if not isinstance(row, dict) or set(row) != {"role", "path", "bytes", "sha256"}:
+            raise ReleaseError("model manifest member differs")
+        relative = row["path"]
+        role = row["role"]
+        if (
+            not isinstance(relative, str)
+            or not isinstance(role, str)
+            or not role
+            or relative in paths
+            or role in roles
+        ):
+            raise ReleaseError("model member path or role differs")
+        path = safe_member(root, relative)
+        data, _ = snapshot_file(path, f"model member {relative}")
+        if (
+            len(data) != row["bytes"]
+            or data_identity(data)["sha256"] != row["sha256"]
+        ):
+            raise ReleaseError(f"model member identity differs: {relative}")
+        expected.append((relative, data))
+        paths.add(relative)
+        roles.add(role)
+    actual = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    if actual != paths:
+        raise ReleaseError("model bundle file closure differs")
+    return sorted(expected)
+
+
+def _tar_info(name: str, size: int, mode: int) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mode = mode
+    info.mtime = 0
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    return info
+
+
+def build_archive(
+    archive: Path,
+    version: str,
+    binary: bytes,
+    model_members: list[tuple[str, bytes]],
+    sbom: bytes,
+    aggregate: bytes,
+    equivalence_receipt: bytes,
+    comparison_report: bytes,
+    source_export: bytes,
+    build_receipt: bytes,
+    public_files: list[tuple[str, bytes]],
+    licenses: list[tuple[str, bytes]],
+    receipt: bytes,
+) -> None:
+    prefix = f"naky-{version}-{TARGET}"
+    entries: list[tuple[str, bytes, int]] = [
+        ("bin/naky", binary, 0o755),
+        ("SBOM.spdx.json", sbom, 0o644),
+        ("evals/aggregate-results.json", aggregate, 0o644),
+        ("evals/public-equivalence.json", equivalence_receipt, 0o644),
+        ("evals/gui-world.html", comparison_report, 0o644),
+        (SOURCE_EXPORT_NAME, source_export, 0o644),
+        ("BUILD-RECEIPT.json", build_receipt, 0o644),
+    ]
+    entries.extend((relative, data, 0o644) for relative, data in public_files)
+    entries.extend((f"licenses/{name}", data, 0o644) for name, data in licenses)
+    entries.extend(
+        (f"share/naky/model/{relative}", data, 0o644)
+        for relative, data in model_members
+    )
+    entries.append(("release.json", receipt, 0o644))
+    with archive.open("xb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as output:
+                for relative, data, mode in sorted(entries):
+                    output.addfile(_tar_info(f"{prefix}/{relative}", len(data), mode), _Bytes(data))
+
+
+class _Bytes:
+    def __init__(self, data: bytes):
+        self.data = data
+        self.offset = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.data) - self.offset
+        result = self.data[self.offset : self.offset + size]
+        self.offset += len(result)
+        return result
+
+
+def publish_release(
+    output_dir: Path,
+    version: str,
+    *,
+    binary: bytes,
+    model_archive: bytes,
+    model_members: list[tuple[str, bytes]],
+    sbom: bytes,
+    aggregate: bytes,
+    equivalence: bytes,
+    comparison: bytes,
+    source_export: bytes,
+    build_receipt: bytes,
+    public_files: list[tuple[str, bytes]],
+    licenses: list[tuple[str, bytes]],
+    receipt: bytes,
+) -> None:
+    archive_name = f"naky-{version}-{TARGET}.tar.gz"
+    model_archive_name = "naky-model-ppocrv6-tiny-all-pp-v1.tar"
+    parent = output_dir.parent
+    if not parent.is_dir() or parent.is_symlink():
+        raise ReleaseError("output parent must be a real directory")
+    temporary = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}-", dir=parent))
+    try:
+        archive = temporary / archive_name
+        build_archive(
+            archive,
+            version,
+            binary,
+            model_members,
+            sbom,
+            aggregate,
+            equivalence,
+            comparison,
+            source_export,
+            build_receipt,
+            public_files,
+            licenses,
+            receipt,
+        )
+        model_archive_path = temporary / model_archive_name
+        model_archive_path.write_bytes(model_archive)
+        checksums = (
+            (archive_name, sha256(archive)),
+            (model_archive_name, sha256(model_archive_path)),
+        )
+        (temporary / f"naky-{version}-SHA256SUMS").write_text(
+            "".join(f"{digest}  {name}\n" for name, digest in sorted(checksums))
+        )
+        (temporary / "release.json").write_bytes(receipt)
+        (temporary / "aggregate-results.json").write_bytes(aggregate)
+        (temporary / "public-equivalence.json").write_bytes(equivalence)
+        (temporary / "gui-world.html").write_bytes(comparison)
+        (temporary / SOURCE_EXPORT_NAME).write_bytes(source_export)
+        (temporary / "BUILD-RECEIPT.json").write_bytes(build_receipt)
+        if output_dir.exists() or output_dir.is_symlink():
+            raise ReleaseError("output directory was created concurrently")
+        os.rename(temporary, output_dir)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--build-receipt", required=True, type=Path)
+    parser.add_argument("--model-bundle", required=True, type=Path)
+    parser.add_argument("--model-archive", required=True, type=Path)
+    parser.add_argument("--sbom", required=True, type=Path)
+    parser.add_argument("--aggregate", required=True, type=Path)
+    parser.add_argument("--equivalence-receipt", required=True, type=Path)
+    parser.add_argument("--comparison-report", required=True, type=Path)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    args = parser.parse_args()
+    if not VERSION_RE.fullmatch(args.version):
+        raise ReleaseError("version must have the form 0.1.0")
+    check_publication_gates(args.aggregate)
+    (
+        source_export_identity,
+        source_tree,
+        product_source,
+        source_export_data,
+        source_files,
+    ) = source_export_snapshot()
+    validate_release_version(source_files, args.version)
+    aggregate_value, aggregate_data, aggregate_identity = json_snapshot(
+        args.aggregate, "evaluation aggregate"
+    )
+    if source_files.get("evals/aggregate-results.json", (None,))[0] != aggregate_data:
+        raise ReleaseError("evaluation aggregate differs from the staged source")
+    aggregate = validate_aggregate(aggregate_value)
+    binary_data, binary_mode = snapshot_file(args.binary, "release binary")
+    binary_identity = authenticate_binary_data(binary_data, binary_mode)
+    build_value, build_receipt_data, build_receipt_identity = json_snapshot(
+        args.build_receipt, "static build receipt"
+    )
+    validate_build_receipt(
+        build_value,
+        source_export=source_export_identity,
+        source_tree=source_tree,
+        product_source=product_source,
+        binary=binary_identity,
+    )
+    manifest_data = source_files.get(
+        "manifests/ppocrv6-tiny-all-pp-bundle-v1.json", (None,)
+    )[0]
+    if not isinstance(manifest_data, bytes):
+        raise ReleaseError("model manifest is absent from the staged source")
+    try:
+        manifest = json.loads(manifest_data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseError("model manifest is invalid") from error
+    manifest_identity = data_identity(manifest_data)
+    if not isinstance(manifest, dict):
+        raise ReleaseError("model manifest is not an object")
+    if (
+        manifest.get("schema_version") != "naky.model-bundle.v1"
+        or manifest.get("bundle_id") != "ppocrv6-tiny-all-pp-v1"
+    ):
+        raise ReleaseError("model manifest contract differs")
+    members = authenticate_model_bundle(args.model_bundle, manifest)
+    model_archive_data, _ = snapshot_file(args.model_archive, "model archive")
+    model_archive_identity = data_identity(model_archive_data)
+    archive_contract = manifest.get("archive")
+    if (
+        not isinstance(archive_contract, dict)
+        or set(archive_contract) != {"format", "bytes", "sha256"}
+        or archive_contract.get("format") != "posix-ustar"
+        or {key: archive_contract.get(key) for key in ("bytes", "sha256")}
+        != model_archive_identity
+    ):
+        raise ReleaseError("model archive does not match the model manifest")
+    member_identities = ordered_identity(
+        [
+            {"bytes": row["bytes"], "sha256": row["sha256"]}
+            for row in manifest["members"]
+        ]
+    )
+    equivalence, equivalence_data, equivalence_identity = json_snapshot(
+        args.equivalence_receipt, "public equivalence receipt"
+    )
+    if source_files.get("evals/public-equivalence.json", (None,))[0] != equivalence_data:
+        raise ReleaseError("public equivalence receipt differs from the staged source")
+    validate_equivalence_receipt(
+        equivalence,
+        receipt_identity=equivalence_identity,
+        binary_identity=binary_identity,
+        model_manifest_identity=manifest_identity,
+        model_archive_identity=model_archive_identity,
+        model_members_identity=member_identities,
+        model_bundle_id=manifest["bundle_id"],
+    )
+    expected_product = {
+        "scored_binary_sha256": equivalence["evaluated_product"]["binary_sha256"],
+        "equivalence_execution_binary": equivalence["public_product"][
+            "evaluated_execution_binary"
+        ],
+        "release_binary": binary_identity,
+        "model_manifest": manifest_identity,
+        "model_archive": model_archive_identity,
+        "equivalence_receipt": equivalence_identity,
+    }
+    validate_product_bindings(aggregate, expected_product)
+    if aggregate["product_source"] != product_source:
+        raise ReleaseError("evaluation aggregate product source differs from staged source")
+    comparison_data, _ = snapshot_file(args.comparison_report, "comparison report")
+    if source_files.get("evals/gui-world.html", (None,))[0] != comparison_data:
+        raise ReleaseError("comparison report differs from the staged source")
+    comparison_identity = data_identity(comparison_data)
+    validate_comparison_report(comparison_data, aggregate_identity["sha256"])
+    sbom, sbom_data, sbom_identity = json_snapshot(args.sbom, "SPDX SBOM")
+    validate_sbom(
+        sbom,
+        sbom_data,
+        source_files=source_files,
+        version=args.version,
+        product_source_sha256=product_source["sha256"],
+    )
+    if args.output_dir.exists() or args.output_dir.is_symlink():
+        raise ReleaseError("output directory must be new")
+    receipt_object = {
+        "schema_version": "naky.release.v1",
+        "version": args.version,
+        "target": TARGET,
+        "source_export": source_export_identity,
+        "source_tree": source_tree,
+        "product_source": product_source,
+        "build_receipt": build_receipt_identity,
+        "binary": binary_identity,
+        "model_manifest": manifest_identity,
+        "model_archive": model_archive_identity,
+        "sbom": sbom_identity,
+        "evaluation_aggregate": aggregate_identity,
+        "public_equivalence": equivalence_identity,
+        "comparison_report": comparison_identity,
+    }
+    receipt = (json.dumps(receipt_object, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    public_names = (
+        "LICENSE",
+        "README.md",
+        "THIRD_PARTY_NOTICES.md",
+        "evals/README.md",
+        "evals/aggregate-results.schema.json",
+    )
+    try:
+        public_files = [(name, source_files[name][0]) for name in public_names]
+    except KeyError as error:
+        raise ReleaseError(f"public release input is absent: {error.args[0]}") from error
+    licenses = [
+        (PurePosixPath(name).name, data)
+        for name, (data, _) in sorted(source_files.items())
+        if PurePosixPath(name).parts[:1] == ("licenses",)
+    ]
+    if not licenses:
+        raise ReleaseError("public license closure is empty")
+    publish_release(
+        args.output_dir,
+        args.version,
+        binary=binary_data,
+        model_archive=model_archive_data,
+        model_members=members,
+        sbom=sbom_data,
+        aggregate=aggregate_data,
+        equivalence=equivalence_data,
+        comparison=comparison_data,
+        source_export=source_export_data,
+        build_receipt=build_receipt_data,
+        public_files=public_files,
+        licenses=licenses,
+        receipt=receipt,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except ReleaseError as error:
+        raise SystemExit(str(error)) from error

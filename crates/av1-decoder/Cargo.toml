@@ -1,0 +1,24 @@
+[package]
+name = "av1-decoder"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["asm"]
+asm = ["rav1d/asm"]
+
+[dependencies]
+libc.workspace = true
+matroska-demuxer.workspace = true
+rav1d.workspace = true
+thiserror.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+undocumented_unsafe_blocks = "deny"

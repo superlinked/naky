@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+"""Build the path-independent Linux x86_64 static release binary."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import tempfile
+from pathlib import Path, PurePosixPath
+
+
+ROOT = Path(__file__).resolve().parents[1]
+TARGET = "x86_64-unknown-linux-musl"
+TARGET_DIR = ROOT / "target/public-release"
+SOURCE_EXPORT = ROOT / "SOURCE-EXPORT.json"
+BUILD_RECEIPT = TARGET_DIR / TARGET / "release/naky-build-receipt.json"
+BUILD_RECEIPT_SCHEMA = "naky.public-static-build.v1"
+SOURCE_EXPORT_SCHEMA = "naky.public-source-export.v1"
+PRODUCT_SOURCE_EXCLUSIONS = frozenset(
+    {
+        "evals/aggregate-results.json",
+        "evals/public-equivalence.json",
+        "evals/gui-world.html",
+    }
+)
+STRIP_SCHEMA = "naky.public-static-strip.v1"
+FORBIDDEN = (
+    "AR",
+    "CC",
+    "CFLAGS",
+    "CPPFLAGS",
+    "CXX",
+    "LDFLAGS",
+    "CARGO_BUILD_JOBS",
+    "CARGO_BUILD_RUSTDOCFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
+    "CARGO_BUILD_TARGET",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_INCREMENTAL",
+    "CARGO_TARGET_DIR",
+    "RUSTFLAGS",
+    "RUSTC",
+    "RUSTC_BOOTSTRAP",
+    "RUSTDOC",
+    "RUSTDOCFLAGS",
+    "RUSTUP_TOOLCHAIN",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+)
+FORBIDDEN_PREFIXES = (
+    "AR_",
+    "CC_",
+    "CFLAGS_",
+    "CXX_",
+    "CARGO_PROFILE_",
+    "CARGO_TARGET_",
+    "LDFLAGS_",
+)
+
+
+def read_regular(path: Path, label: str) -> tuple[bytes, int]:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise SystemExit(f"cannot open {label}: {path}") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise SystemExit(f"{label} is not a regular file: {path}")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    stable = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) == (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    data = b"".join(chunks)
+    if not stable or len(data) != before.st_size:
+        raise SystemExit(f"{label} changed while it was read: {path}")
+    if not data:
+        raise SystemExit(f"{label} is empty: {path}")
+    return data, before.st_mode
+
+
+def data_identity(data: bytes) -> dict[str, object]:
+    return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def identity(path: Path) -> dict[str, object]:
+    data, _ = read_regular(path, "required file")
+    return data_identity(data)
+
+
+def source_tree_identity(files: list[dict[str, object]]) -> dict[str, object]:
+    raw = json.dumps(
+        {"schema_version": "naky.public-source-tree.v1", "files": files},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "algorithm": "sha256(canonical-json-public-source-tree-v1)",
+        "files": len(files),
+        "bytes": sum(int(row["bytes"]) for row in files),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def product_source_identity(files: list[dict[str, object]]) -> dict[str, object]:
+    members = [row for row in files if row["path"] not in PRODUCT_SOURCE_EXCLUSIONS]
+    raw = json.dumps(
+        {"schema_version": "naky.public-product-source.v1", "files": members},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "algorithm": "sha256(canonical-json-public-product-source-v1)",
+        "files": len(members),
+        "bytes": sum(int(row["bytes"]) for row in members),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def source_member(root: Path, receipt_name: str, relative: str) -> Path:
+    member = PurePosixPath(relative)
+    if (
+        member.is_absolute()
+        or ".." in member.parts
+        or str(member) != relative
+        or not member.parts
+        or member.parts[0] in {".git", "target"}
+        or relative == receipt_name
+    ):
+        raise SystemExit(f"unsafe source member path: {relative}")
+    return root.joinpath(*member.parts)
+
+
+def git_mode_matches(mode: int, executable: bool) -> bool:
+    permissions = stat.S_IMODE(mode)
+    return permissions & 0o7000 == 0 and bool(permissions & 0o111) == executable
+
+
+def source_provenance(
+    root: Path | None = None, source_export: Path | None = None
+) -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    bytes,
+    list[tuple[str, bytes, bool]],
+]:
+    root = ROOT if root is None else root
+    source_export = SOURCE_EXPORT if source_export is None else source_export
+    receipt_data, _ = read_regular(source_export, "source export receipt")
+    receipt_identity = data_identity(receipt_data)
+    try:
+        receipt = json.loads(receipt_data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SystemExit("SOURCE-EXPORT.json is not valid JSON") from error
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"schema_version", "product_source", "source_tree", "files"}
+        or receipt["schema_version"] != SOURCE_EXPORT_SCHEMA
+        or not isinstance(receipt["files"], list)
+    ):
+        raise SystemExit("SOURCE-EXPORT.json contract differs")
+    files = receipt["files"]
+    expected: set[str] = set()
+    snapshots: list[tuple[str, bytes, bool]] = []
+    previous = ""
+    for row in files:
+        if not isinstance(row, dict) or set(row) != {
+            "path",
+            "bytes",
+            "sha256",
+            "executable",
+        }:
+            raise SystemExit("SOURCE-EXPORT.json file contract differs")
+        relative = row["path"]
+        if not isinstance(relative, str) or relative <= previous:
+            raise SystemExit("SOURCE-EXPORT.json paths are not strictly ordered")
+        previous = relative
+        path = source_member(root, source_export.name, relative)
+        data, mode = read_regular(path, f"source export member {relative}")
+        if (
+            relative in expected
+            or not isinstance(row["bytes"], int)
+            or isinstance(row["bytes"], bool)
+            or row["bytes"] < 1
+            or not isinstance(row["sha256"], str)
+            or len(row["sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in row["sha256"])
+            or not isinstance(row["executable"], bool)
+            or len(data) != row["bytes"]
+            or data_identity(data)["sha256"] != row["sha256"]
+            or not git_mode_matches(mode, row["executable"])
+        ):
+            raise SystemExit(f"source export member identity differs: {relative}")
+        expected.add(relative)
+        snapshots.append((relative, data, row["executable"]))
+    tree = source_tree_identity(files)
+    product_source = product_source_identity(files)
+    if (
+        receipt["source_tree"] != tree
+        or receipt["product_source"] != product_source
+        or tree["bytes"] < 1
+    ):
+        raise SystemExit("SOURCE-EXPORT.json tree identity differs")
+    actual: set[str] = set()
+    for path in root.rglob("*"):
+        relative = path.relative_to(root).as_posix()
+        first = PurePosixPath(relative).parts[0]
+        if first in {".git", "target"} or relative == source_export.name:
+            continue
+        if path.is_symlink():
+            raise SystemExit(f"source export contains a symlink: {relative}")
+        if path.is_file():
+            actual.add(relative)
+    if actual != expected:
+        raise SystemExit("source export file closure differs")
+    return receipt_identity, tree, product_source, receipt_data, snapshots
+
+
+def materialize_snapshot(
+    root: Path,
+    receipt_data: bytes,
+    members: list[tuple[str, bytes, bool]],
+) -> Path:
+    for relative, data, executable in members:
+        destination = root.joinpath(*PurePosixPath(relative).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+        destination.chmod(0o755 if executable else 0o644)
+    receipt = root / SOURCE_EXPORT.name
+    receipt.write_bytes(receipt_data)
+    receipt.chmod(0o644)
+    return receipt
+
+
+def write_receipt(path: Path, value: dict[str, object]) -> None:
+    data = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".build-receipt-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def tool_version(command: list[str], label: str) -> dict[str, object]:
+    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    output = result.stdout.encode()
+    if not output or not output.endswith(b"\n"):
+        raise SystemExit(f"{label} version output differs")
+    return {"version": result.stdout.splitlines()[0], "output": data_identity(output)}
+
+
+def strip_once(
+    tool: bytes, binary: bytes, root: Path, suffix: str
+) -> tuple[bytes, str]:
+    executable = root / f"strip-{suffix}"
+    candidate = root / f"naky-{suffix}"
+    executable.write_bytes(tool)
+    executable.chmod(0o700)
+    candidate.write_bytes(binary)
+    candidate.chmod(0o700)
+    environment = {"LC_ALL": "C", "PATH": "/usr/bin:/bin", "TZ": "UTC"}
+    try:
+        version = subprocess.run(
+            [executable, "--version"],
+            check=True,
+            capture_output=True,
+            env=environment,
+            timeout=30,
+        )
+        stripped = subprocess.run(
+            [executable, "--strip-all", candidate],
+            check=True,
+            capture_output=True,
+            env=environment,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise SystemExit("authenticated GNU strip execution failed") from error
+    if stripped.stdout or stripped.stderr or version.stderr:
+        raise SystemExit("authenticated GNU strip emitted unexpected output")
+    try:
+        version_text = version.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise SystemExit("GNU strip version output is not UTF-8") from error
+    first_line = version_text.splitlines()[0] if version_text.splitlines() else ""
+    if not first_line.startswith("GNU strip (GNU Binutils") or len(first_line) > 200:
+        raise SystemExit("strip tool is not GNU strip")
+    return candidate.read_bytes(), first_line
+
+
+def normalize_binary(binary: Path) -> tuple[dict[str, object], dict[str, object]]:
+    unstripped, _ = read_regular(binary, "unstripped release binary")
+    unstripped_identity = data_identity(unstripped)
+    strip_name = shutil.which("x86_64-linux-gnu-strip") or shutil.which("strip")
+    if strip_name is None:
+        raise SystemExit("GNU strip is not available")
+    strip_path = Path(strip_name).resolve(strict=True)
+    strip_tool, _ = read_regular(strip_path, "strip tool")
+    strip_identity = data_identity(strip_tool)
+    with tempfile.TemporaryDirectory(
+        prefix=".naky-strip-", dir=binary.parent
+    ) as temporary:
+        root = Path(temporary)
+        first, first_version = strip_once(strip_tool, unstripped, root, "first")
+        second, second_version = strip_once(strip_tool, unstripped, root, "second")
+    if first != second or first_version != second_version:
+        raise SystemExit("strip-all normalization is not deterministic")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".naky-release-", dir=binary.parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(first)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary_name, 0o755)
+        os.replace(temporary_name, binary)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+    release_identity = data_identity(first)
+    return unstripped_identity, {
+        "schema_version": STRIP_SCHEMA,
+        "operation": "gnu-strip-all",
+        "tool": {
+            "name": "GNU strip",
+            "version": first_version,
+            "binary": strip_identity,
+        },
+        "arguments": ["--strip-all", "<unstripped-binary-copy>"],
+        "deterministic_replays": 2,
+        "input": unstripped_identity,
+        "output": release_identity,
+    }
+
+
+def main() -> int:
+    present = sorted(
+        name
+        for name in os.environ
+        if name in FORBIDDEN or name.startswith(FORBIDDEN_PREFIXES)
+    )
+    if present:
+        raise SystemExit(f"refusing build environment overrides: {', '.join(present)}")
+    source_export, source_tree, product_source, receipt_data, source_members = source_provenance()
+    if TARGET_DIR.exists() or TARGET_DIR.is_symlink():
+        raise SystemExit("public release target directory must not exist")
+    cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")).resolve()
+    toolchain = {
+        "cargo": tool_version(["cargo", "--version", "--verbose"], "cargo"),
+        "rustc": tool_version(["rustc", "--version", "--verbose"], "rustc"),
+    }
+    rust_sysroot = Path(
+        subprocess.run(
+            ["rustc", "--print", "sysroot"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    ).resolve()
+    TARGET_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".naky-source-", dir=TARGET_DIR) as temporary:
+        build_root = Path(temporary)
+        snapshot_receipt = materialize_snapshot(
+            build_root, receipt_data, source_members
+        )
+        snapshot = source_provenance(build_root, snapshot_receipt)
+        if snapshot[:4] != (source_export, source_tree, product_source, receipt_data):
+            raise SystemExit("isolated source snapshot differs")
+        flags = (
+            f"--remap-path-prefix={build_root}=/naky/source",
+            f"--remap-path-prefix={TARGET_DIR}=/naky/target",
+            f"--remap-path-prefix={cargo_home}=/naky/cargo",
+            f"--remap-path-prefix={rust_sysroot}=/naky/rust",
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "CARGO_BUILD_JOBS": "1",
+                "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags),
+                "CARGO_INCREMENTAL": "0",
+                "CARGO_NET_OFFLINE": "true",
+                "CARGO_TARGET_DIR": str(TARGET_DIR),
+                "JEMALLOC_SYS_WITH_MALLOC_CONF": "dirty_decay_ms:-1,muzzy_decay_ms:-1",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "SOURCE_DATE_EPOCH": "0",
+                "TZ": "UTC",
+                "ZERO_AR_DATE": "1",
+            }
+        )
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--offline",
+                "--release",
+                "--workspace",
+                "--target",
+                TARGET,
+                "--jobs",
+                "1",
+            ],
+            cwd=build_root,
+            env=environment,
+            check=True,
+        )
+        if source_provenance(build_root, snapshot_receipt) != snapshot:
+            raise SystemExit("isolated source snapshot changed during the static build")
+    binary = TARGET_DIR / TARGET / "release/naky"
+    if not binary.is_file() or binary.is_symlink():
+        raise SystemExit("release binary is missing")
+    binary.chmod(0o755)
+    unstripped_binary, normalization = normalize_binary(binary)
+    receipt = {
+        "schema_version": BUILD_RECEIPT_SCHEMA,
+        "build_contract": "naky-static-musl-v1",
+        "target": TARGET,
+        "profile": "release",
+        "source_export": source_export,
+        "source_tree": source_tree,
+        "product_source": product_source,
+        "toolchain": toolchain,
+        "unstripped_binary": unstripped_binary,
+        "normalization": normalization,
+        "binary": identity(binary),
+    }
+    write_receipt(BUILD_RECEIPT, receipt)
+    print(binary)
+    print(BUILD_RECEIPT)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

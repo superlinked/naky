@@ -1,0 +1,101 @@
+{
+  "schema_version": "naky.model-bundle.v1",
+  "bundle_id": "ppocrv6-tiny-all-pp-v1",
+  "archive": {
+    "format": "posix-ustar",
+    "bytes": 6400000,
+    "sha256": "623b117bc719a302f5e7ab9a59fba2b19b8ab3a45770c588d6a839a6f10a8ea7"
+  },
+  "members": [
+    {
+      "role": "license",
+      "path": "LICENSES/Apache-2.0.txt",
+      "bytes": 11376,
+      "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+    },
+    {
+      "role": "notice",
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 1442,
+      "sha256": "b123140abecb57c266c512078659c71feadf00223c35c58429f1c885637937f9"
+    },
+    {
+      "role": "recognizer-config",
+      "path": "config/recognizer-inference.yml",
+      "bytes": 55571,
+      "sha256": "66170210bad538e83fff3c4a3867e547d6bf20b50d64b20347c4b913f3034ea1"
+    },
+    {
+      "role": "detector-model",
+      "path": "models/detector.rten",
+      "bytes": 1804288,
+      "sha256": "1a1460534f3731ab88453cbf681ed2a006629937786b562c92217fcf0adf4a09"
+    },
+    {
+      "role": "recognizer-model",
+      "path": "models/recognizer.rten",
+      "bytes": 4485096,
+      "sha256": "5c1c9a16fcdb11e9e032d289c26f111c8fcc1de061a8c1981e8ba80c2079f6bb"
+    },
+    {
+      "role": "detector-model-card",
+      "path": "provenance/detector-model-card.md",
+      "bytes": 16064,
+      "sha256": "f48628931a5dc994ce5c67e32c94d71b4a7e96b8c5c1b00663284999c3c566bc"
+    },
+    {
+      "role": "recognizer-model-card",
+      "path": "provenance/recognizer-model-card.md",
+      "bytes": 16600,
+      "sha256": "e83dd03e515a2d064eaba8ec82248f21dbf6a0813550bafe4c70ee2f6e8fdf2a"
+    }
+  ],
+  "sources": {
+    "detector": {
+      "publisher": "PaddlePaddle",
+      "repository": "https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx",
+      "revision": "2ba1506c0380b8f0b03dd142459aac66d4421f6c",
+      "source_onnx_bytes": 1780590,
+      "source_onnx_sha256": "193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8",
+      "model_card_path": "provenance/detector-model-card.md",
+      "result_path": "models/detector.rten",
+      "license": "Apache-2.0"
+    },
+    "recognizer": {
+      "publisher": "PaddlePaddle",
+      "repository": "https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_rec_onnx",
+      "revision": "2612ab37152ae0a677521bae4e1e3d4fb4cf7c30",
+      "source_onnx_bytes": 4462639,
+      "source_onnx_sha256": "9ef676d6ed3c88256a2d92c640c44f25b0c40947e111b14b8be8f594091563e6",
+      "model_card_path": "provenance/recognizer-model-card.md",
+      "result_path": "models/recognizer.rten",
+      "inference_yaml_path": "config/recognizer-inference.yml",
+      "license": "Apache-2.0"
+    }
+  },
+  "conversion": {
+    "tool": "rten-convert",
+    "version": "0.22.0",
+    "repository_revision": "fc3460b21f627b6c90eb396180d8b261e826ad5c",
+    "command": "rten-convert --infer-shapes inference.onnx output.rten",
+    "independent_byte_identical_conversions": 2
+  },
+  "dictionary": {
+    "source": "config/recognizer-inference.yml:PostProcess.character_dict",
+    "ordered_unique_entries": 6904,
+    "canonical_bytes": 27156,
+    "canonical_sha256": "c5cbe34ef40c29c4df07ed012bf96569cb69a2d2a01a07027e9f13cb832bd9cd",
+    "append_space": true,
+    "decoded_labels": 6905,
+    "ctc_blank_class": 0,
+    "model_output_classes": 6906
+  },
+  "licensing": {
+    "redistribution_conclusion": "Apache-2.0 for these exact pinned publisher artifacts",
+    "license_path": "LICENSES/Apache-2.0.txt",
+    "notice_path": "THIRD_PARTY_NOTICES.md",
+    "upstream_notice_present": false,
+    "training_data_provenance": "not disclosed by the pinned publisher repositories",
+    "no_endorsement": "PaddlePaddle does not endorse Näky or this converted package"
+  }
+}

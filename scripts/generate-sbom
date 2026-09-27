@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Generate deterministic SPDX 2.3 JSON from the locked Cargo workspace."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+from pathlib import Path
+
+
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+TARGET = "x86_64-unknown-linux-musl"
+LICENSE_MANIFEST = Path(__file__).resolve().parents[1] / "dependency-licenses.json"
+
+
+def spdx_id(name: str, version: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9.-]", "-", f"{name}-{version}")
+    return f"SPDXRef-Package-{value}"
+
+
+def license_expression(value: str | None) -> str:
+    if value is None:
+        return "NOASSERTION"
+    normalized = value.replace("/", " OR ")
+    if "/" in normalized:
+        raise ValueError("license expression contains an invalid slash alternative")
+    return normalized
+
+
+def audited_licenses(path: Path = LICENSE_MANIFEST) -> dict[tuple[str, str], dict[str, str]]:
+    manifest = json.loads(path.read_text())
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "schema_version",
+        "target",
+        "packages",
+    }:
+        raise ValueError("dependency license manifest structure differs")
+    if (
+        manifest["schema_version"] != "naky.dependency-licenses.v1"
+        or manifest["target"] != TARGET
+        or not isinstance(manifest["packages"], list)
+    ):
+        raise ValueError("dependency license manifest contract differs")
+    result: dict[tuple[str, str], dict[str, str]] = {}
+    for package in manifest["packages"]:
+        if not isinstance(package, dict) or set(package) != {
+            "name",
+            "version",
+            "licenseDeclared",
+            "licenseConcluded",
+        }:
+            raise ValueError("dependency license manifest package structure differs")
+        if not all(isinstance(package[field], str) and package[field] for field in package):
+            raise ValueError("dependency license manifest package value differs")
+        identity = (package["name"], package["version"])
+        if identity in result:
+            raise ValueError("dependency license manifest contains a duplicate package")
+        result[identity] = {
+            "licenseDeclared": package["licenseDeclared"],
+            "licenseConcluded": package["licenseConcluded"],
+        }
+    return result
+
+
+def release_packages(metadata: dict[str, object]) -> list[dict[str, object]]:
+    packages = metadata.get("packages")
+    resolve = metadata.get("resolve")
+    if not isinstance(packages, list) or not isinstance(resolve, dict):
+        raise ValueError("Cargo metadata structure differs")
+    nodes = resolve.get("nodes")
+    if not isinstance(nodes, list):
+        raise ValueError("Cargo metadata resolve graph differs")
+    packages_by_id = {package.get("id"): package for package in packages}
+    nodes_by_id = {node.get("id"): node for node in nodes}
+    roots = [
+        package["id"]
+        for package in packages
+        if package.get("name") == "naky" and package.get("source") is None
+    ]
+    if len(roots) != 1:
+        raise ValueError("release package root differs")
+    selected: set[str] = set()
+    pending = roots
+    while pending:
+        package_id = pending.pop()
+        if package_id in selected:
+            continue
+        package = packages_by_id.get(package_id)
+        node = nodes_by_id.get(package_id)
+        if not isinstance(package, dict) or not isinstance(node, dict):
+            raise ValueError("release package graph differs")
+        selected.add(package_id)
+        dependencies = node.get("deps")
+        if not isinstance(dependencies, list):
+            raise ValueError("release dependency graph differs")
+        for dependency in dependencies:
+            kinds = dependency.get("dep_kinds")
+            if not isinstance(kinds, list):
+                raise ValueError("release dependency kinds differ")
+            if any(kind.get("kind") != "dev" for kind in kinds):
+                pending.append(dependency.get("pkg"))
+    result = [packages_by_id[package_id] for package_id in selected]
+    return sorted(result, key=lambda row: (row["name"], row["version"]))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--product-source-sha256", required=True)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    if not VERSION_RE.fullmatch(args.version):
+        raise SystemExit("version must have the form 0.1.0")
+    if not SHA256_RE.fullmatch(args.product_source_sha256):
+        raise SystemExit("product source SHA-256 must be lowercase hexadecimal")
+    if args.output.exists() or args.output.is_symlink():
+        raise SystemExit("output must be new")
+    metadata = json.loads(
+        subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--locked",
+                "--offline",
+                "--filter-platform",
+                TARGET,
+                "--format-version",
+                "1",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    audited = audited_licenses()
+    released = release_packages(metadata)
+    identities = {(package["name"], package["version"]) for package in released}
+    if identities != set(audited):
+        raise ValueError("release dependency graph differs from the audited license manifest")
+    packages = []
+    relationships = []
+    for package in released:
+        identity = (package["name"], package["version"])
+        license_fields = audited[identity]
+        if license_expression(package.get("license")) != license_fields["licenseDeclared"]:
+            raise ValueError(f"Cargo license differs from audit for {identity[0]} {identity[1]}")
+        identifier = spdx_id(package["name"], package["version"])
+        row = {
+            "SPDXID": identifier,
+            "name": package["name"],
+            "versionInfo": package["version"],
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": False,
+            "licenseConcluded": license_fields["licenseConcluded"],
+            "licenseDeclared": license_fields["licenseDeclared"],
+            "copyrightText": "NOASSERTION",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE-MANAGER",
+                    "referenceType": "purl",
+                    "referenceLocator": f"pkg:cargo/{package['name']}@{package['version']}",
+                }
+            ],
+        }
+        packages.append(row)
+        relationships.append(
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": identifier,
+            }
+        )
+    document = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"naky-{args.version}",
+        "documentNamespace": (
+            "https://github.com/superlinked/naky/releases/"
+            f"download/v{args.version}/sbom-{args.product_source_sha256}"
+        ),
+        "creationInfo": {
+            "created": "1970-01-01T00:00:00Z",
+            "creators": ["Tool: naky-generate-sbom-v1"],
+        },
+        "packages": packages,
+        "relationships": relationships,
+    }
+    args.output.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

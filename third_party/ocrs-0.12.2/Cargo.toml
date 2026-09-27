@@ -1,0 +1,20 @@
+[package]
+name = "ocrs"
+version = "0.12.2"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/robertknight/ocrs"
+
+[dependencies]
+anyhow.workspace = true
+rayon = "1.11.0"
+rten.workspace = true
+rten-imageproc.workspace = true
+rten-tensor.workspace = true
+thiserror.workspace = true
+
+[lib]
+test = false
+
+[dev-dependencies]
+fastrand = "2.3.0"

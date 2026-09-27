@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/superlinked/naky/blob/main/schemas/screenevents-v0.schema.json",
+  "title": "Naky ScreenEvents v0 CloudEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "sequence",
+    "frametime",
+    "datacontenttype",
+    "type",
+    "data"
+  ],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "pattern": "^urn:naky:stream:[^\\s]+$" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "frametime": { "type": "integer", "minimum": 0 },
+    "datacontenttype": { "const": "application/json" },
+    "type": {
+      "enum": [
+        "dev.naky.screenevents.snapshot.v0",
+        "dev.naky.screenevents.element.appeared.v0",
+        "dev.naky.screenevents.element.moved.v0",
+        "dev.naky.screenevents.element.content_changed.v0",
+        "dev.naky.screenevents.element.disappeared.v0",
+        "dev.naky.screenevents.screen.resized.v0",
+        "dev.naky.screenevents.activity.observed.v0"
+      ]
+    },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.snapshot.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/snapshot" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.element.appeared.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/elementData" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.element.moved.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/moved" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.element.content_changed.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/elementData" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.element.disappeared.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/disappeared" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.screen.resized.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/resized" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "dev.naky.screenevents.activity.observed.v0" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/observedActivity" } } }
+    }
+  ],
+  "$defs": {
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "element": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "box", "confidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^e[0-9]{6,}$" },
+        "box": { "$ref": "#/$defs/rect" },
+        "text": { "type": "string" },
+        "role": { "type": "string" },
+        "state": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "confidence": {
+          "description": "Detector confidence quantized to one decimal place.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "multipleOf": 0.1
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame", "elements"],
+      "properties": {
+        "frame": { "$ref": "#/$defs/frame" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } }
+      }
+    },
+    "elementData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["element"],
+      "properties": { "element": { "$ref": "#/$defs/element" } }
+    },
+    "moved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^e[0-9]{6,}$" },
+        "from": { "$ref": "#/$defs/rect" },
+        "to": { "$ref": "#/$defs/rect" }
+      }
+    },
+    "disappeared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": { "id": { "type": "string", "pattern": "^e[0-9]{6,}$" } }
+    },
+    "resized": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/frame" },
+        "to": { "$ref": "#/$defs/frame" }
+      }
+    },
+    "observedActivity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_frametime", "kind", "element_id"],
+          "properties": {
+            "from_frametime": { "type": "integer", "minimum": 0 },
+            "kind": { "const": "element_region_changed" },
+            "element_id": { "type": "string", "pattern": "^e[0-9]{6,}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_frametime", "kind", "box", "dx", "dy"],
+          "properties": {
+            "from_frametime": { "type": "integer", "minimum": 0 },
+            "kind": { "const": "region_translated" },
+            "box": { "$ref": "#/$defs/rect" },
+            "dx": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+            "dy": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 }
+          },
+          "not": {
+            "properties": { "dx": { "const": 0 }, "dy": { "const": 0 } },
+            "required": ["dx", "dy"]
+          }
+        }
+      ]
+    }
+  }
+}

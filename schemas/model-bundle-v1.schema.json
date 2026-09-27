@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/superlinked/naky/blob/main/schemas/model-bundle-v1.schema.json",
+  "title": "Näky exact product model bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_id",
+    "archive",
+    "members",
+    "sources",
+    "conversion",
+    "dictionary",
+    "licensing"
+  ],
+  "properties": {
+    "schema_version": { "const": "naky.model-bundle.v1" },
+    "bundle_id": { "const": "ppocrv6-tiny-all-pp-v1" },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "bytes", "sha256"],
+      "properties": {
+        "format": { "const": "posix-ustar" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "members": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/member" }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detector", "recognizer"],
+      "properties": {
+        "detector": { "$ref": "#/$defs/detectorSource" },
+        "recognizer": { "$ref": "#/$defs/recognizerSource" }
+      }
+    },
+    "conversion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "version",
+        "repository_revision",
+        "command",
+        "independent_byte_identical_conversions"
+      ],
+      "properties": {
+        "tool": { "const": "rten-convert" },
+        "version": { "const": "0.22.0" },
+        "repository_revision": { "$ref": "#/$defs/sha1" },
+        "command": { "type": "string", "minLength": 1 },
+        "independent_byte_identical_conversions": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "dictionary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "ordered_unique_entries",
+        "canonical_bytes",
+        "canonical_sha256",
+        "append_space",
+        "decoded_labels",
+        "ctc_blank_class",
+        "model_output_classes"
+      ],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "ordered_unique_entries": { "const": 6904 },
+        "canonical_bytes": { "const": 27156 },
+        "canonical_sha256": { "$ref": "#/$defs/sha256" },
+        "append_space": { "const": true },
+        "decoded_labels": { "const": 6905 },
+        "ctc_blank_class": { "const": 0 },
+        "model_output_classes": { "const": 6906 }
+      }
+    },
+    "licensing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "redistribution_conclusion",
+        "license_path",
+        "notice_path",
+        "upstream_notice_present",
+        "training_data_provenance",
+        "no_endorsement"
+      ],
+      "properties": {
+        "redistribution_conclusion": { "type": "string", "minLength": 1 },
+        "license_path": { "const": "LICENSES/Apache-2.0.txt" },
+        "notice_path": { "const": "THIRD_PARTY_NOTICES.md" },
+        "upstream_notice_present": { "const": false },
+        "training_data_provenance": { "type": "string", "minLength": 1 },
+        "no_endorsement": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "path", "bytes", "sha256"],
+      "properties": {
+        "role": {
+          "enum": [
+            "license",
+            "notice",
+            "recognizer-config",
+            "detector-model",
+            "recognizer-model",
+            "detector-model-card",
+            "recognizer-model-card"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "detectorSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publisher",
+        "repository",
+        "revision",
+        "source_onnx_bytes",
+        "source_onnx_sha256",
+        "model_card_path",
+        "result_path",
+        "license"
+      ],
+      "properties": {
+        "publisher": { "const": "PaddlePaddle" },
+        "repository": { "type": "string", "format": "uri" },
+        "revision": { "$ref": "#/$defs/sha1" },
+        "source_onnx_bytes": { "type": "integer", "minimum": 1 },
+        "source_onnx_sha256": { "$ref": "#/$defs/sha256" },
+        "model_card_path": { "type": "string", "minLength": 1 },
+        "result_path": { "type": "string", "minLength": 1 },
+        "license": { "const": "Apache-2.0" }
+      }
+    },
+    "recognizerSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publisher",
+        "repository",
+        "revision",
+        "source_onnx_bytes",
+        "source_onnx_sha256",
+        "model_card_path",
+        "result_path",
+        "inference_yaml_path",
+        "license"
+      ],
+      "properties": {
+        "publisher": { "const": "PaddlePaddle" },
+        "repository": { "type": "string", "format": "uri" },
+        "revision": { "$ref": "#/$defs/sha1" },
+        "source_onnx_bytes": { "type": "integer", "minimum": 1 },
+        "source_onnx_sha256": { "$ref": "#/$defs/sha256" },
+        "model_card_path": { "type": "string", "minLength": 1 },
+        "result_path": { "type": "string", "minLength": 1 },
+        "inference_yaml_path": { "type": "string", "minLength": 1 },
+        "license": { "const": "Apache-2.0" }
+      }
+    }
+  }
+}
