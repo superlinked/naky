@@ -223,6 +223,36 @@ export function createPresentationClock(presentedFramesSupported) {
   });
 }
 
+export function createFrameCallbackLifecycle() {
+  let generation = 0;
+  let pending = null;
+
+  return Object.freeze({
+    request(schedule, cancel, callback) {
+      if (pending !== null) return false;
+      if (typeof schedule !== "function" || typeof cancel !== "function" || typeof callback !== "function") {
+        throw new Error("frame callback lifecycle requires schedule, cancel, and callback functions");
+      }
+      const requestedGeneration = generation;
+      let fired = false;
+      const identifier = schedule((...args) => {
+        fired = true;
+        if (requestedGeneration !== generation) return;
+        pending = null;
+        callback(...args);
+      });
+      if (!fired) pending = {identifier, cancel};
+      return true;
+    },
+    invalidate() {
+      generation += 1;
+      const request = pending;
+      pending = null;
+      if (request !== null) request.cancel(request.identifier);
+    },
+  });
+}
+
 function samplePosition(sampleBoundaries, timeMs) {
   if (!Array.isArray(sampleBoundaries)) throw new Error("structural samples must be an array");
   let latest = null;

@@ -1,4 +1,4 @@
-import {indexStateBlocks, parseEventStream, selectTimeGroup, stateAt} from "./replay.mjs";
+import {createFrameCallbackLifecycle, indexStateBlocks, parseEventStream, selectTimeGroup, stateAt} from "./replay.mjs";
 
 const DURATION_MS = 13299;
 const WIDTH = 304;
@@ -39,7 +39,7 @@ let blockNodes = new Map();
 let selectedBlock = null;
 let followPlayhead = true;
 let programmaticScrollUntil = 0;
-let requestedFrame = false;
+const frameCallbacks = createFrameCallbackLifecycle();
 
 function manifestIsValid(value) {
   return value?.schema_version === EXPECTED.schema &&
@@ -149,21 +149,30 @@ function currentMediaMs() {
 }
 
 function requestFrameLoop() {
-  if (requestedFrame || elements.video.paused) return;
-  requestedFrame = true;
+  if (elements.video.paused) return;
   if ("requestVideoFrameCallback" in elements.video) {
-    elements.video.requestVideoFrameCallback((_now, metadata) => {
-      requestedFrame = false;
-      renderAt(Math.round(metadata.mediaTime * 1000));
-      requestFrameLoop();
-    });
+    frameCallbacks.request(
+      (callback) => elements.video.requestVideoFrameCallback(callback),
+      (identifier) => elements.video.cancelVideoFrameCallback?.(identifier),
+      (_now, metadata) => {
+        renderAt(Math.round(metadata.mediaTime * 1000));
+        requestFrameLoop();
+      },
+    );
   } else {
-    requestAnimationFrame(() => {
-      requestedFrame = false;
-      renderAt(currentMediaMs());
-      requestFrameLoop();
-    });
+    frameCallbacks.request(
+      (callback) => requestAnimationFrame(callback),
+      (identifier) => cancelAnimationFrame(identifier),
+      () => {
+        renderAt(currentMediaMs());
+        requestFrameLoop();
+      },
+    );
   }
+}
+
+function invalidateFrameLoop() {
+  frameCallbacks.invalidate();
 }
 
 function updatePlayState() {
@@ -236,6 +245,7 @@ function bindInteractions() {
   elements.modeButtons.forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
   elements.play.addEventListener("click", async () => {
     if (!elements.video.paused) {
+      invalidateFrameLoop();
       elements.video.pause();
       return;
     }
@@ -244,15 +254,18 @@ function bindInteractions() {
   });
   elements.timeline.addEventListener("input", () => {
     const timeMs = Number(elements.timeline.value);
+    invalidateFrameLoop();
     if (Number.isFinite(elements.video.duration)) elements.video.currentTime = timeMs / 1000;
     renderAt(timeMs);
+    requestFrameLoop();
   });
   elements.video.addEventListener("play", updatePlayState);
-  elements.video.addEventListener("pause", () => { updatePlayState(); renderAt(currentMediaMs()); });
-  elements.video.addEventListener("seeked", () => renderAt(currentMediaMs()));
+  elements.video.addEventListener("pause", () => { invalidateFrameLoop(); updatePlayState(); renderAt(currentMediaMs()); });
+  elements.video.addEventListener("seeking", invalidateFrameLoop);
+  elements.video.addEventListener("seeked", () => { renderAt(currentMediaMs()); requestFrameLoop(); });
   elements.video.addEventListener("timeupdate", () => renderAt(currentMediaMs()));
-  elements.video.addEventListener("ended", () => { elements.video.currentTime = 0; renderAt(0); updatePlayState(); });
-  elements.video.addEventListener("error", () => { elements.videoError.hidden = false; updatePlayState(); });
+  elements.video.addEventListener("ended", () => { invalidateFrameLoop(); elements.video.currentTime = 0; renderAt(0); updatePlayState(); });
+  elements.video.addEventListener("error", () => { invalidateFrameLoop(); elements.videoError.hidden = false; updatePlayState(); });
   elements.stateViewport.addEventListener("scroll", () => {
     if (!followPlayhead || performance.now() < programmaticScrollUntil) return;
     followPlayhead = false;
@@ -267,7 +280,10 @@ function bindInteractions() {
     setCurrentBlock(current);
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && !elements.video.paused) elements.video.pause();
+    if (document.hidden && !elements.video.paused) {
+      invalidateFrameLoop();
+      elements.video.pause();
+    }
   });
 }
 
