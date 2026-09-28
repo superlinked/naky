@@ -4,6 +4,9 @@ Näky converts canonical AV1 Matroska screen recordings into ScreenEvents and a
 bounded text view suitable for a reasoning model. Näky supports
 64-bit Linux on x86 processors.
 
+[See how Näky represents a recording](https://superlinked.github.io/naky/) or
+[read the full matched evaluation](https://superlinked.github.io/naky/evals/gui-world.html).
+
 ## Install
 
 The release installer verifies the published SHA-256 checksum before copying

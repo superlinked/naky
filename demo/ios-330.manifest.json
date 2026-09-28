@@ -1,0 +1,73 @@
+{
+  "schema_version": "naky.public-demo.v1",
+  "recording": {
+    "dataset": "ONE-Lab/GUI-World",
+    "dataset_url": "https://huggingface.co/datasets/ONE-Lab/GUI-World",
+    "revision": "7901fa3f0b9e36afa87d24ff9ecd48037c7fd6a0",
+    "split": "TRAIN/development",
+    "member": "IOS/330.mp4",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "original": {
+      "bytes": 370461,
+      "sha256": "9df9a40972ff72ae9dc407a44e02a2bda3606ded63117157f89af44d00cf0a44"
+    },
+    "canonical_av1_input": {
+      "bytes": 180770,
+      "sha256": "9656224d2514fd93425de9924e0cd870f82a69c786dc45e67da2f8c103dee2fb"
+    }
+  },
+  "presentation": {
+    "width": 304,
+    "height": 640,
+    "duration_ms": 13299,
+    "media": {
+      "path": "ios-330.mp4",
+      "bytes": 370461,
+      "sha256": "9df9a40972ff72ae9dc407a44e02a2bda3606ded63117157f89af44d00cf0a44"
+    },
+    "note": "The original MP4 is included byte-for-byte for browser playback. Näky processed its canonical AV1 equivalent."
+  },
+  "output": {
+    "release": "v0.1.0",
+    "stream_id": "IOS-330",
+    "events": {
+      "path": "ios-330.events.ndjson",
+      "bytes": 73539,
+      "sha256": "deced573621b8b530d66eaf1d00acd8faaf23b898c3da94c7239510744b8a1a7"
+    },
+    "state": {
+      "path": "ios-330.screen.txt",
+      "bytes": 1649,
+      "sha256": "5ad0419dd4ebe355ab72ad153c0a509115715c82b07422d42db74c3788e1478a"
+    },
+    "event_count": 243,
+    "event_family_counts": {
+      "activity_observed": 43,
+      "element_appeared": 40,
+      "element_content_changed": 48,
+      "element_disappeared": 45,
+      "element_moved": 66,
+      "snapshot": 1
+    },
+    "structural_sample_times_ms": [
+      99,
+      1099,
+      2099,
+      3099,
+      4099,
+      5099,
+      6132,
+      7132,
+      8132,
+      9132,
+      10132,
+      11132,
+      12132,
+      13132
+    ],
+    "first_event_ms": 99,
+    "last_event_ms": 13132,
+    "generation_note": "Produced by the published Näky v0.1.0 binary from the identified canonical AV1 recording."
+  }
+}

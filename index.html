@@ -3,11 +3,139 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="0; url=evals/gui-world.html">
-    <link rel="canonical" href="evals/gui-world.html">
-    <title>Näky evaluation</title>
+    <meta name="description" content="See how Näky turns an AV1 screen recording into a compact, time-ordered screen state for reasoning models.">
+    <meta name="theme-color" content="#07100f">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>How Näky sees a screen recording</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/how-it-works.css">
+    <script type="module" src="assets/how-it-works.mjs"></script>
   </head>
   <body>
-    <p><a href="evals/gui-world.html">Open the Näky evaluation comparison.</a></p>
+    <header class="site-header">
+      <a class="wordmark" href="./" aria-label="Näky home">Näky<span aria-hidden="true">.</span></a>
+      <nav aria-label="Main navigation">
+        <a href="https://github.com/superlinked/naky">GitHub</a>
+        <a href="README.md#install">Install</a>
+        <a href="https://github.com/superlinked/naky/releases/tag/v0.1.0">v0.1.0</a>
+        <a href="evals/gui-world.html">Full evaluation</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">Screen perception for reasoning models</p>
+        <h1 id="page-title">Screen recordings in.<br><span>Structured state out.</span></h1>
+        <p class="lede">Näky turns a screen recording into a chronological text representation: what text was observed, where it was, how it persisted, and when the screen changed.</p>
+      </section>
+
+      <section class="demo-shell" aria-labelledby="demo-title">
+        <div class="demo-heading">
+          <div>
+            <p class="section-kicker">13 seconds, one shared playhead</p>
+            <h2 id="demo-title">See the pixels and the state together</h2>
+          </div>
+          <div class="mode-control">
+            <span id="mode-label">What the model receives</span>
+            <div class="segment" role="group" aria-labelledby="mode-label">
+              <button type="button" class="mode-button is-active" data-mode="state" aria-pressed="true">Näky state</button>
+              <button type="button" class="mode-button" data-mode="pixels" aria-pressed="false">Screen pixels</button>
+            </div>
+          </div>
+        </div>
+
+        <p id="mode-explanation" class="mode-explanation" aria-live="polite" aria-atomic="true">A text model receives the exact state stream on the right. The recording remains visible here only as a reference.</p>
+
+        <div class="comparison" data-mode="state">
+          <article class="screen-column" aria-labelledby="screen-title">
+            <div class="pane-title">
+              <div>
+                <span class="pane-number">01</span>
+                <h3 id="screen-title">What the screen shows</h3>
+              </div>
+              <span class="pane-tag" id="overlay-status">Näky overlay</span>
+            </div>
+            <div class="phone-stage" id="phone-stage">
+              <video id="demo-video" muted playsinline preload="auto" aria-label="A Duolingo lesson screen recording used to demonstrate Näky">
+                <source src="demo/ios-330.mp4" type="video/mp4">
+                Your browser cannot play the demo video. <a href="demo/ios-330.mp4">Download the MP4</a>.
+              </video>
+              <svg id="overlay" class="overlay" viewBox="0 0 304 640" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <div class="screen-caption"><span class="status-dot" aria-hidden="true"></span><span id="moment-label">Loading authentic output…</span></div>
+            </div>
+            <div class="playback-controls">
+              <button id="play-button" class="play-button" type="button" aria-label="Play recording">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path class="play-icon" d="M4 2.7 13 8l-9 5.3Z"/><path class="pause-icon" d="M3.5 2.5h3v11h-3Zm6 0h3v11h-3Z"/></svg>
+                <span id="play-label">Play</span>
+              </button>
+              <div class="timeline-wrap">
+                <input id="timeline" type="range" min="0" max="13299" value="0" step="1" aria-label="Recording position">
+                <div id="marker-rail" class="marker-rail" aria-hidden="true"></div>
+              </div>
+              <output id="time-output" for="timeline">0:00 / 0:13</output>
+            </div>
+            <p id="video-error" class="asset-error" hidden>Video playback is unavailable, but the timeline and state stream remain inspectable. <a href="demo/ios-330.mp4">Download the source MP4.</a></p>
+          </article>
+
+          <article class="state-column" aria-labelledby="state-title">
+            <div class="pane-title state-title-row">
+              <div>
+                <span class="pane-number">02</span>
+                <h3 id="state-title">What the model receives</h3>
+              </div>
+              <a class="raw-link" href="demo/ios-330.screen.txt">Raw output</a>
+            </div>
+            <div class="grammar" aria-label="State syntax legend">
+              <span><b>@</b> time</span><span><b>S</b> screen</span><span><b>= + ~ &gt; −</b> set · add · change · move · remove</span><span><b>!</b> observed activity</span>
+            </div>
+            <div class="state-viewport-wrap">
+              <div id="state-viewport" class="state-viewport" tabindex="0" aria-label="Time-ordered Näky state stream"></div>
+              <div class="not-sent" aria-hidden="true"><strong>Not sent</strong><span>The screenshot reader receives sampled pixels instead.</span></div>
+            </div>
+            <div class="state-footer">
+              <span id="state-status" role="status">Loading state stream…</span>
+              <button id="follow-button" type="button" hidden>Follow playhead</button>
+            </div>
+          </article>
+        </div>
+
+        <noscript>
+          <p class="noscript">JavaScript synchronizes the recording, overlay, and text. You can still open the <a href="demo/ios-330.screen.txt">exact state stream</a>, <a href="demo/ios-330.events.ndjson">ScreenEvents</a>, or <a href="demo/ios-330.mp4">demo recording</a>.</p>
+        </noscript>
+      </section>
+
+      <section class="reading-guide" aria-labelledby="preserves-title">
+        <p class="section-kicker">What survives the conversion</p>
+        <h2 id="preserves-title">A screen becomes a small, evolving document.</h2>
+        <div class="fact-grid">
+          <article><span>Identity + geometry</span><h3>Text stays anchored</h3><p>Stable IDs associate OCR observations across time. Boxes keep each observation tied to its screen position.</p></article>
+          <article><span>Time-ordered deltas</span><h3>Change stays explicit</h3><p>Additions, edits, moves, removals, and observed visual activity update the state instead of repeating every frame.</p></article>
+          <article><span>Honest boundaries</span><h3>Pixels still know more</h3><p>Appearance, icons, color, fine visual state, and anything OCR misses may remain available only in pixels.</p></article>
+        </div>
+      </section>
+
+      <section class="limits" aria-labelledby="limits-title">
+        <div>
+          <p class="section-kicker">Read the overlay literally</p>
+          <h2 id="limits-title">Observations, not inferred actions.</h2>
+        </div>
+        <div class="limits-copy">
+          <p>OCR-derived text and boxes are observations and can be wrong. Geometry and stable IDs show what Näky associated over time.</p>
+          <p>Visual activity means pixels changed in a region during an interval. It is not a click, scroll, focus, selection, action, intent, or cause label.</p>
+          <p>The released comparison found higher quality from screenshots. Näky scored <strong>82.61%</strong> versus <strong>88.21%</strong> for screenshots across 3,468 tasks, while using <strong>50.91% fewer</strong> logical three-trial input tokens and an estimated <strong>46.50% lower</strong> cache-aware reader cost. <a href="evals/gui-world.html">Read the full matched comparison.</a></p>
+        </div>
+      </section>
+
+      <section class="attribution" aria-labelledby="source-title">
+        <h2 id="source-title">Demo source</h2>
+        <p><code>IOS/330.mp4</code> from the <a href="https://huggingface.co/datasets/ONE-Lab/GUI-World">GUI-World dataset by ONE-Lab</a>, pinned at revision <code>7901fa3f…</code>, TRAIN/development, under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Näky-generated overlay and text are derived from the recording. Third-party names, marks, and interface content belong to their owners. <a href="demo/ATTRIBUTION.md">Full attribution and transformation note.</a></p>
+      </section>
+    </main>
+
+    <footer>
+      <a class="wordmark" href="./">Näky<span aria-hidden="true">.</span></a>
+      <p>Self-contained Rust screen perception.</p>
+      <nav aria-label="Footer navigation"><a href="README.md">Documentation</a><a href="evals/gui-world.html">Evaluation</a><a href="https://github.com/superlinked/naky">Source</a></nav>
+    </footer>
   </body>
 </html>
