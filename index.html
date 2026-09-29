@@ -32,7 +32,7 @@
       <section class="demo-shell" aria-labelledby="demo-title">
         <div class="demo-heading">
           <div>
-            <p class="section-kicker">13 seconds, one shared playhead</p>
+            <p class="section-kicker" id="demo-kicker">Loading recording, one shared playhead</p>
             <h2 id="demo-title">See the pixels and the state together</h2>
           </div>
           <div class="mode-control">
@@ -44,6 +44,14 @@
           </div>
         </div>
 
+        <div class="recording-picker">
+          <label for="recording-select">Choose a recording</label>
+          <select id="recording-select" aria-describedby="recording-summary" disabled>
+            <option>Loading recordings…</option>
+          </select>
+          <p id="recording-summary" role="status" aria-live="polite" aria-atomic="true">Loading the public recording gallery…</p>
+        </div>
+
         <p id="mode-explanation" class="mode-explanation" aria-live="polite" aria-atomic="true">A text model receives the exact state stream on the right. The recording remains visible here only as a reference.</p>
 
         <div class="comparison" data-mode="state">
@@ -53,12 +61,16 @@
                 <span class="pane-number">01</span>
                 <h3 id="screen-title">What the screen shows</h3>
               </div>
-              <span class="pane-tag" id="overlay-status">Näky overlay</span>
+              <span class="pane-tag" id="overlay-status">Complete Näky overlay</span>
+            </div>
+            <div class="overlay-legend" aria-label="Overlay legend">
+              <span><i class="legend-retained" aria-hidden="true"></i>Retained element</span>
+              <span><i class="legend-change" aria-hidden="true"></i>Recent change</span>
+              <span><i class="legend-activity" aria-hidden="true"></i>Observed activity</span>
             </div>
             <div class="phone-stage" id="phone-stage">
-              <video id="demo-video" muted playsinline preload="auto" aria-label="A Duolingo lesson screen recording used to demonstrate Näky">
-                <source src="demo/ios-330.mp4" type="video/mp4">
-                Your browser cannot play the demo video. <a href="demo/ios-330.mp4">Download the MP4</a>.
+              <video id="demo-video" muted playsinline preload="auto" aria-label="Screen recording used to demonstrate Näky">
+                Your browser cannot play the selected demo video. <a id="video-fallback-download" href="demo/ios-330.mp4">Download the MP4</a>.
               </video>
               <svg id="overlay" class="overlay" viewBox="0 0 304 640" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="screen-caption"><span class="status-dot" aria-hidden="true"></span><span id="moment-label">Loading authentic output…</span></div>
@@ -69,12 +81,12 @@
                 <span id="play-label">Play</span>
               </button>
               <div class="timeline-wrap">
-                <input id="timeline" type="range" min="0" max="13299" value="0" step="1" aria-label="Recording position">
+                <input id="timeline" type="range" min="0" max="13299" value="0" step="1" aria-label="Recording position" disabled>
                 <div id="marker-rail" class="marker-rail" aria-hidden="true"></div>
               </div>
               <output id="time-output" for="timeline">0:00 / 0:13</output>
             </div>
-            <p id="video-error" class="asset-error" hidden>Video playback is unavailable, but the timeline and state stream remain inspectable. <a href="demo/ios-330.mp4">Download the source MP4.</a></p>
+            <p id="video-error" class="asset-error" hidden>Video playback is unavailable, but the timeline and state stream remain inspectable. <a id="video-download" href="demo/ios-330.mp4">Download the selected source MP4.</a></p>
           </article>
 
           <article class="state-column" aria-labelledby="state-title">
@@ -83,7 +95,7 @@
                 <span class="pane-number">02</span>
                 <h3 id="state-title">What the model receives</h3>
               </div>
-              <a class="raw-link" href="demo/ios-330.screen.txt">Raw output</a>
+              <span class="raw-links"><a class="raw-link" id="raw-events-link" href="demo/ios-330.events.ndjson">Events</a><a class="raw-link" id="raw-state-link" href="demo/ios-330.screen.txt">Raw state</a></span>
             </div>
             <div class="grammar" aria-label="State syntax legend">
               <span><b>@</b> time</span><span><b>S</b> screen</span><span><b>= + ~ &gt; −</b> set · add · change · move · remove</span><span><b>!</b> observed activity</span>
@@ -100,7 +112,7 @@
         </div>
 
         <noscript>
-          <p class="noscript">JavaScript synchronizes the recording, overlay, and text. You can still open the <a href="demo/ios-330.screen.txt">exact state stream</a>, <a href="demo/ios-330.events.ndjson">ScreenEvents</a>, or <a href="demo/ios-330.mp4">demo recording</a>.</p>
+          <p class="noscript">JavaScript synchronizes and switches the recordings, overlays, and text. The <a href="demo/gallery.json">public demo catalog</a> links each closed manifest; you can also open the default <a href="demo/ios-330.screen.txt">exact state stream</a>, <a href="demo/ios-330.events.ndjson">ScreenEvents</a>, or <a href="demo/ios-330.mp4">recording</a>.</p>
         </noscript>
       </section>
 
@@ -121,6 +133,7 @@
         </div>
         <div class="limits-copy">
           <p>OCR-derived text and boxes are observations and can be wrong. Geometry and stable IDs show what Näky associated over time.</p>
+          <p>The overlay draws every element retained at the playhead, every recent structural change, and every displayed activity region. Anything extraction did not retain remains visible only in the pixels.</p>
           <p>Visual activity means pixels changed in a region during an interval. It is not a click, scroll, focus, selection, action, intent, or cause label.</p>
           <p>The released comparison found higher quality from screenshots. Näky scored <strong>82.61%</strong> versus <strong>88.21%</strong> for screenshots across 3,468 tasks, while using <strong>50.91% fewer</strong> logical three-trial input tokens and an estimated <strong>46.50% lower</strong> cache-aware reader cost. <a href="evals/gui-world.html">Read the full matched comparison.</a></p>
         </div>
@@ -128,7 +141,7 @@
 
       <section class="attribution" aria-labelledby="source-title">
         <h2 id="source-title">Demo source</h2>
-        <p><code>IOS/330.mp4</code> from the <a href="https://huggingface.co/datasets/ONE-Lab/GUI-World">GUI-World dataset by ONE-Lab</a>, pinned at revision <code>7901fa3f…</code>, TRAIN/development, under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Näky-generated overlay and text are derived from the recording. Third-party names, marks, and interface content belong to their owners. <a href="demo/ATTRIBUTION.md">Full attribution and transformation note.</a></p>
+        <p id="source-summary" aria-live="polite">Select a recording to see its source. Third-party names, marks, and interface content belong to their owners. <a href="demo/ATTRIBUTION.md">Full attribution and transformation notes.</a></p>
       </section>
     </main>
 

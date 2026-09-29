@@ -1,0 +1,185 @@
+screenevents-state
+@0
+S412,732
+=1 95,596 Other
+87,523 Exchange and Office 365
+32,522 E图
+94,445 Yahoo
+39,377 0
+97,368 Outlook, Hotmail, and Live
+28,282 G Google
+28,180 Set up email
+35,116 M
+119,7 9
+341,3 A0
+7,3 3:05A
+@1000
+-1-12
++13 38,586 G
+320,484 a
+44,412 Maps
+27,70 Monday, Oct 10
+64,11 A
+8,6 3:05
+377,1 0
+@2000 !1000/15
+-13-16
++20 208,687 pS
+112,686 Phone
+184,687 Ph
+327,684 Play S..
+256,683 Play
+25,684 Mess...
+153,606 小
+333,551 Maps
+254,553 Google
+185,553 Gmail
+113,554 Files
+38,553 Drive
+50,503 7
+73,471 0MG
+28,420 Calen... Camera Chrome Clock Conta
+41,357 10
+82,334 098
+167,286 All apps
+334,230 Maps
+250,230 Calen..
+177,232 Photos
+33,230 Gmail YouTu...
+96,160 0
+165,155 七0
+43,64 G
+@3000 !1000/25-31,33,34,36,37
+-17-44
++45 177,594 NO THANKS
+311,594 SIGNIN
+91,537 on topics that interest you, sign in
+90,508 To see search results and updates
+91,478 app
+23,445 G
+90,446 Sign in to personalize your Google
+35,402 Turn on Discover to get
+33,366 favorite topics
+33,333 Keep up with your
+343,235 0
+82,232 Search..
+49,235 O
+107,118 Google
+123,8 0
+12 8,3 3:05 A
+11 338,2 A0
+@4000
+-11,12,45-59
++20 208,687 pS
+112,686 Phone
+184,687 Ph
+326,683 Play S...
+256,683 Play
+25,684 Mess...
+60 153,607 子
+27 333,551 Maps
+254,553 Google
+185,553 Gmail
+113,554 Files
+38,553 Drive
+50,503 7
+73,471 0MG
+28,420 Calen... Camera Chrome Clock Conta
+41,357 10
+83,334 098
+167,286 All apps
+334,230 Maps
+250,230 Calen..
+177,232 Photos
+33,230 Gmail YouTu...
+61 95,158 口
+169,155 七D
+44 43,64 G
+17 62,9 A
+9,6 3:05
+366,4 0
+@5000
+-62
+~61 96,158 D
++43 168,155 七0
+@6000 !1000/18-21,23-25,27-31,33-41,43,44,60,61
+-17-25,27-41,43,60,61
++63 104,440 .. hardware
+349,439 下
+32,435 Q
+98,379 lowe's to me
+348,363 下
+32,360 Q
+97,353 where is the closest
+92,292 where is nearest lowe's 区
+36,293 Q
+97,235 closest lowe's
+348,219 下
+28,212 Q
+97,208 how do i get to the
+97,162 nearest lowe's
+348,147 下
+32,144 Q
+96,136 how do i get to the
+90,68 ) the nearest Lowe's?H ×
+@7000 !1000/80
+-44,63-80
++81 329,213 Maps
+33,212 Gmail YouTu...Photos Calen...
+338,60 g
+28,64 G kearch apps, web, a..
+@8000
+-81-84
++85 97,548 near me
+347,529 7
+32,526 Q
+95,517 where is there a lowes
+97,472 lowe's near me
+348,458 7
+32,454 Q
+96,446 where is the closest
+93,385 where is nearest lowe's 区
+36,386 Q
+96,326 closest lowe's
+348,314 7
+34,310 Q
+96,301 how do iget to the
+97,255 lowe's store
+348,242 7
+32,238 Q
+97,230 where's the nearest
+96,185 here
+95,160 nearest lowe's from
+348,159 7
+33,157 Q
+79 95,134 how do i get to the
+107 95,69 to the nearest Lowe's?
+347,72 X
+44 32,69 G
+@9000 !1000/44,79,88,104,107
+-44,79,85-108
++109 285,634 Collections
+176,635 Search
+43,633 Discover
+314,598 可
+189,599 Q
+60,597 米
+76,500 Enter destination
+29,441 O
+75,435 Your location
+134,350 suggestions.
+80,315 entering it below to get
+51,281 No results for that place. Try
+250,209 News
+331,207 Videos
+162,208 Books
+78,207 Maps
+25,209 All
+105,141 how do iget to the n
+331,135 0
+136,39 Google
+333,39 9
+64,11 0
+124,9 P
+8,3 3:08
+19 340,3 0

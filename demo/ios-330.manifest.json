@@ -8,6 +8,7 @@
     "member": "IOS/330.mp4",
     "license": "CC BY 4.0",
     "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_kind": "continuous_recording",
     "original": {
       "bytes": 370461,
       "sha256": "9df9a40972ff72ae9dc407a44e02a2bda3606ded63117157f89af44d00cf0a44"
@@ -30,6 +31,7 @@
   },
   "output": {
     "release": "v0.1.0",
+    "release_binary_sha256": "c791889fa5bc3f85a8398dddc0901ff3cf4f9bb84777fe48bf7e1f3c58c33b4a",
     "stream_id": "IOS-330",
     "events": {
       "path": "ios-330.events.ndjson",

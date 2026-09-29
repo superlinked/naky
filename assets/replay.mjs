@@ -288,7 +288,15 @@ export function stateAt(events, timeMs, sampleBoundaries = null) {
       const current = elements.get(event.data.id);
       current.box = {...event.data.to};
       trails.push({elementId: event.data.id, from: {...event.data.from}, to: {...event.data.to}, frametime: event.frametime});
-      changes.push({kind: "moved", frametime: event.frametime, elementId: event.data.id, box: {...event.data.to}, element: cloneElement(current)});
+      changes.push({
+        kind: "moved",
+        frametime: event.frametime,
+        elementId: event.data.id,
+        box: {...event.data.to},
+        from: {...event.data.from},
+        to: {...event.data.to},
+        element: cloneElement(current),
+      });
     } else if (event.type === TYPES.DISAPPEARED) {
       const former = elements.get(event.data.id);
       elements.delete(event.data.id);
@@ -317,6 +325,49 @@ export function stateAt(events, timeMs, sampleBoundaries = null) {
     activities,
     trails,
     changes: changes.filter((item) => timeMs - item.frametime <= RECENT_CHANGE_WINDOW_MS),
+  };
+}
+
+function cloneRect(value) {
+  return {x: value.x, y: value.y, width: value.width, height: value.height};
+}
+
+/**
+ * Project one replay snapshot into the complete set of explanatory SVG marks.
+ * IDs remain available in the exact state stream but are deliberately absent
+ * here: this projection explains spatial coverage rather than tracker identity.
+ */
+export function overlayPrimitives(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || !snapshot.frame) {
+    throw new Error("overlay snapshot must contain screen bounds");
+  }
+  if (!Array.isArray(snapshot.elements) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.activities)) {
+    throw new Error("overlay snapshot collections are invalid");
+  }
+
+  const retained = snapshot.elements.map((item) => ({box: cloneRect(item.box)}));
+  const changes = snapshot.changes.map((item) => {
+    const result = {kind: item.kind, box: cloneRect(item.box)};
+    if (item.kind === "moved") {
+      result.from = cloneRect(item.from);
+      result.to = cloneRect(item.to);
+    }
+    return result;
+  });
+  const activities = snapshot.activities.map((item) => {
+    const result = {kind: item.kind, box: cloneRect(item.box)};
+    if (item.kind === "region_translated") {
+      result.dx = item.dx;
+      result.dy = item.dy;
+    }
+    return result;
+  });
+
+  return {
+    frame: {width: snapshot.frame.width, height: snapshot.frame.height},
+    retained,
+    changes,
+    activities,
   };
 }
 

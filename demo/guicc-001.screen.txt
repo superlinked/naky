@@ -1,0 +1,196 @@
+screenevents-state
+@0
+S1080,2400
+=1 842,1626 YouTube
+603,1624 Photos
+72,1622 Play Store
+361,1623 Gmail
+570,1423 2
+841,1307 Settings
+336,1310 Contacts
+85,1310 Calendar
+615,1309 Clock
+131,1175 21
+94,229 Sun, Apr 21
+120,18 A
+18,12 4:51
+@1000 !1000/1-11
+-1-12
++14 185,2221 Volume, haptics, Do Not Disturb
+78,2166 D
+183,2154 Sound & vibration
+188,1993 8% used - 58.99 GB free
+85,1946 0
+183,1924 Storage
+186,1760 100%
+182,1691 Battery
+184,1526 Notification history, conversations
+90,1482 口
+186,1459 Notifications
+183,1296 Assistant, recent apps, default apps
+179,1227 Apps
+184,1065 Bluetooth, pairing
+78,1021 [o0
+188,1001 Connected devices
+186,833 Mobile, Wi-Fi, hotspot
+78,780 6
+185,768 Network & internet
+97,561 Q Search settings
+51,348 Settings
+938,253 a
+117,10 S
+892,10 A0
+176,15 A
+@2000 !1000/14,16,17,19-22,24-34
+-27-35,37
++39 187,2213 App security, device lock, permissions
+80,2157 9
+181,2142 Security & privacy
+191,1984 Display, interaction, audio
+185,1915 Accessibility
+187,1748 Colors, themed icons, app grid
+84,1701 P
+183,1680 Wallpaper & style
+185,1518 Dark theme, font size, brightness
+81,1466 位
+182,1448 Display
+>14 185,1287
+88,1246
+186,1222
+186,1057
+85,1013
+182,989
+184,819
+184,754
+188,597
+90,547
+185,526
+184,363
+181,292
+~26:AppS
++50 96,140 Q Search settings
+897,14 D
+@3000 !1000/23,36,38-41,45,46,48,49
+-14-26,36,38-51
++52 59,2243 Gesture navigation
+59,2175 Navigation mode
+59,2019 Display size and text
+62,1879 On/Clock
+56,1812 Screen saver
+58,1673 Will never turn on automatically
+58,1604 Dark theme
+59,1493 Appearance
+60,1335 Not set
+58,1265 Screen timeout
+58,1123 Show all notification content
+62,1062 Lock screen
+55,938 Lock display
+59,785 100%
+60,721 Brightness level
+56,598 Brightness
+51,355 Display
+178,19 Q
+117,19 白
+37 892,10 A0
+71 227,15 A
+@4000
+-13,70,71
+~57:Will never turn off automatically
++72 293,16 A
+~69 176,16 白
+37 889,6 A
++73 22,9 4:52 】
+@5000 !1000/52-67
+-37,52-68
++1 842,1626 YouTube
+603,1624 Photos
+4 364,1626 Gmail
+3 72,1622 Play Store
+5 581,1434 2
+841,1307 Settings
+336,1310 Contacts
+85,1310 Calendar
+615,1309 Clock
+128,1168 21
+92,228 Sun, Apr 21
+~73 18,12 4:52
+69 178,10 回
+@6000 !1000/11
+-1-11
++74 62,999 Control Cent..
+851,688 Everand
+563,685 Media365 R...
+72,685 Pocket FM
+349,681 Audible
+621,535 m
+572,369 Play Books
+360,371 Kindle
+103,369 TikTok
+868,363 Edge
+~69:白
+@7000 !1000/77-80,83
+-74-83
++84 835,2281 MORE
+484,2279 LIBRARY
+163,2281 HOME
+37,2100 New Releases in Kindle Store
+37,1950 See All
+697,1796 MCFADDEN
+480,1766 norel
+728,1749 FREIDA
+715,1728 NEW YORKTIMES BESTSELING AUTHOR
+50,1710 MURDER
+424,1713 SOULS
+995,1687 WC
+95,1690 THE
+475,1682 OF
+228,1654 mIm
+49,1641 AND CANDICE FOX
+384,1637 CALAMITY
+728,1621 DO0R
+988,1591 HAI
+385,1568 #1 New York Times Bestselling Author
+42,1537 PATTERSON
+706,1549 LOCKED
+996,1535 KR
+776,1529 THE
+373,1521 BALDACCI
+1008,1510 #1 New York
+97,1503 TMEI
+415,1468 DAVID
+91,1469 ST
+37,1329 Most Wished For Kindle Books
+37,1181 See All
+84,1068 NEW YORK TIMES BESTSELLING
+386,1060 BARBARA DAVIS
+62,1037 GREGG OLSEN
+742,1040 A Novel of the Plague
+687,1009 HAMNET
+854,981 E
+698,976 y
+985,974 YOU'D KIL
+405,921 CIRLS
+118,913 BOND OF 5ISTERHOOD
+68,894 FAMILY SECRETS,AND THE UNBREAKABLE
+107,871 A TRUE STORY OF MURDER
+416,849 1OON
+973,835 Gu
+113,821 TELL
+433,813 OF THE
+976,810 0OOK CLUO
+122,762 YOU
+978,762 ALtT
+436,741 AST
+692,726 O'FARRELL
+973,721 LucY
+450,697 THE:
+151,700 IF
+719,700 MAGGIE
+718,679 NATIONAL BESTSELLER
+980,675 NEW YORK
+37,557 Popular this month
+170,412 recommendations below, or shop the store.
+97,360 Find your next great read by browsing top picks and
+351,268 Welcome to Kindle!
+995,126 O
+154,122 Search Kindle

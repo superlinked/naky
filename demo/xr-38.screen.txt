@@ -1,0 +1,142 @@
+screenevents-state
+@0
+S1280,720
+=1 576,565 Bachelor's Degree c
+481,564 Educatioral level:
+546,533 Engllsho
+482,531 Language:
+623,500 Easy
+484,496 Leel of drticulty:
+631,454 Gol it
+633,421 IOutput,yOuicaik add
+585,396 Io be the match thni
+588,375 can afso just entar the name of
+555,347 How Ito get the best results
+685,324 Horw to get the best resubs
+668,325 0
+514,287 Load tr decuiment Algebra i Practice Test. brd x
+494,259 Input
+483,225 Exams/Quizzes
+307,218 EdForge
+@200 !1-12,14-17
+@1000 !5
+-6-10,14
+~1 572,563 Bachelor's Dagree 2
+479,563 Educational level:
+544,531 English o
++18 503,495 el of ditficulty:
+487,500 H
+490,432 T
+~11 555,348 Itow to get the best resulis
+681,320 How to ge the best resultbs
++21 693,291 ost.tt X
+513,287 Loadtyt de
+495,287 由
+@2000
+-1,5,11-13,15,16,18-23
++24 573,500 Bachelor's Degree
+>2 478,498
+~2:Educational level
+>3 544,466
+479,462
++25 534,434 slides
+483,430 Nurnb
+482,400 Configuration
+680,354 How to get the best results
+664,354 0
+493,314 or paats your temd here
+358,297 E1
+488,280 由 Load tx docuvent
+486,254 Irput
+476,218 Presentations
+@2200 !30
+@2600 !2,25,28,30,32,33
+@3000 !30
+-25,26,31,33
+~24 574,504 Bachelor's Degree c
+2 479,500 Educational level:
++35 482,432 Number of slides:
+~28 682,358 How to get the best rests
+30 497,318 or pastE your teod here
++36 354,298 /Quiz2es
+~32 489,285 (] Load txt document
++15 488,259 Input
+@3400 !30
+@3800 !2,4,27,30,34,35
+@4000 !15,24
+-2-4,15,24,27-30,32,34-36
++37 301,267 Toats
+492,264 tont
+477,228 Presentalione
+@4400 !37
+@4600 !39
+@5000 !37
+-17,37-39
++40 704,405 1E bynes
+708,391 AO7w
+715,378 Test
+685,366 Algebra lI Practice
+685,248 Apps
+@5600 !44
+@6000 !43
+-40-44
++45 604,506 sDegreeC
+664,355 How to get the best rusult
+645,353 6
+472,288 Loid,tt docum
+475,264 T
+34 457,221 Presentations
+50 276,218 EdForge
+@7000
+-45-49
++51 564,466 Bachelor's Degree
+472,468 Educatianal level:
+473,434 Language:
+535,432 English o
+470,396 Number of slide
+472,368 Configuration
+671,320 How to get the best results
+655,321 6
+497,285 Load bt dlocurment Algebra I Practice Test.txt X
+482,287 6
+475,255 Input
+@7400 !34,50-61
+@8000 !61
+-53,59,60
+~51 568,464 Bachelor's Degree c
+472,464 Educational level:
++62 473,427 Languago:
+~55 474,394 Nurmber of slides:
++63 590,285 Algetbral Practice Test.tat X
+481,281 Load .tnt document
+@9000
+-57,58,62-64
+~51 570,468 Bachelor's Degree o
+475,468 Educational lervel
++53 477,433 Language
+~55 476,398 Number of slide
++65 700,326 to gef the besit reaults
+684,293 Test.tt X
+~61 484,260 loput
+@9200 !34,50,51,53-56,61,65,66
+@9600 !52,55
+@9800 !51
+@10000
+-34,50-56,61,65,66
++67 773,665 Photorealistic 3D Model of the human heort.
+420,485 D
+278,486 Function of the
+1041,404 Heart vals
+124,366 Screenshots
+390,172 $49.99
+388,138 3D4Medical from Elsevier
+389,114 Tour Realistic 3D Human Heart
+392,88 Complete HeartX [12
+448,26 This app is only available for Apple Vision Pro. Learn More
+@10200 !70,75
+@10233
+~67 773,666 Photorealistic 3D Model of the human heart.
+421,488 回
+277,487 Function of the h
+1042,404 Hert vaiß
+75 391,85 Complete HeartX (12]

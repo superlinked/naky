@@ -1,0 +1,80 @@
+{
+  "schema_version": "naky.public-demo.v1",
+  "recording": {
+    "dataset": "Android in the Wild",
+    "dataset_url": "https://github.com/google-research/google-research/tree/5b09c22d73a9d35eb6c5d2a99b95677a45053466/android_in_the_wild",
+    "revision": "5b09c22d73a9d35eb6c5d2a99b95677a45053466",
+    "split": "General Standard.train",
+    "member": "episode 6456252662470590836",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_kind": "screenshot_sequence",
+    "source_sequence": {
+      "frames": 10,
+      "width": 412,
+      "height": 732,
+      "pixel_format": "rgb24",
+      "packing": "display-order frames, row-major, tightly packed",
+      "bytes": 9047520,
+      "sha256": "19df50c26701e5af1c2fda53a56635458424c984c2d4e6c8bcf7e67bd41a26b1"
+    },
+    "ffv1_bridge": {
+      "bytes": 553732,
+      "sha256": "6423b456f2bbc56a5f6f1b8a0232198873bac15c5f6ac68d14933babd7d28f20"
+    },
+    "canonical_av1_input": {
+      "bytes": 140046,
+      "sha256": "a1b03070d967912262ca1fdba1f7c2e08a274e9e58fbd51cc3bee7218b6a501a"
+    }
+  },
+  "presentation": {
+    "width": 412,
+    "height": 732,
+    "duration_ms": 10000,
+    "media": {
+      "path": "aitw-6456252662470590836.mp4",
+      "bytes": 189571,
+      "sha256": "b91d2a10d3b319e622f151c8e2aa5400ecfe615ddc5fb8b488123bd507658542"
+    },
+    "note": "The public benchmark provides a screenshot sequence rather than continuous video. The ten frames are presented at one frame per second without resizing or cropping. Näky processed the same ordered frames after canonical AV1 conversion."
+  },
+  "output": {
+    "release": "v0.1.0",
+    "release_binary_sha256": "c791889fa5bc3f85a8398dddc0901ff3cf4f9bb84777fe48bf7e1f3c58c33b4a",
+    "stream_id": "aitw-6456252662470590836",
+    "events": {
+      "path": "aitw-6456252662470590836.events.ndjson",
+      "bytes": 109584,
+      "sha256": "20212be781944590cb5f58075d6e66b8f8f99cd868f0d0c0d0ca6de4bcfd1b01"
+    },
+    "state": {
+      "path": "aitw-6456252662470590836.screen.txt",
+      "bytes": 2969,
+      "sha256": "85e7598b088348d339e05f54c83ac46d05b09bd4f117d91558ba2569fcc21331"
+    },
+    "event_count": 346,
+    "event_family_counts": {
+      "activity_observed": 43,
+      "element_appeared": 151,
+      "element_content_changed": 5,
+      "element_disappeared": 138,
+      "element_moved": 8,
+      "snapshot": 1
+    },
+    "structural_sample_times_ms": [
+      0,
+      1000,
+      2000,
+      3000,
+      4000,
+      5000,
+      6000,
+      7000,
+      8000,
+      9000
+    ],
+    "first_event_ms": 0,
+    "last_event_ms": 9000,
+    "generation_note": "Produced by the published Näky v0.1.0 binary from the identified canonical AV1 sequence."
+  }
+}

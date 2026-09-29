@@ -1,0 +1,78 @@
+{
+  "schema_version": "naky.public-demo.v1",
+  "recording": {
+    "dataset": "minuzero/GUI-CC",
+    "dataset_url": "https://huggingface.co/datasets/minuzero/GUI-CC/tree/758a5bcf4093ba4111a2cc882632eb47423130d1",
+    "revision": "758a5bcf4093ba4111a2cc882632eb47423130d1",
+    "split": "offline/train",
+    "member": "sample 001, derived from GUIOdyssey episode 9028299814029721",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_kind": "screenshot_sequence",
+    "source_sequence": {
+      "frames": 8,
+      "width": 1080,
+      "height": 2400,
+      "pixel_format": "rgb24",
+      "packing": "display-order frames, row-major, tightly packed",
+      "bytes": 62208000,
+      "sha256": "093eccaa28b26fc7d3836ca936a69f1b9105292709a9a90cb1536f39a824a6ad"
+    },
+    "ffv1_bridge": {
+      "bytes": 4455715,
+      "sha256": "e0ba1131178e5ab6aaa86a7dd24bfabdcbb76a6b5e84aadc4f8b47d1273f2665"
+    },
+    "canonical_av1_input": {
+      "bytes": 722324,
+      "sha256": "02512b250c36c78e6d5076d8639e5566eb421a64493c0f787e06e1e6320430a3"
+    }
+  },
+  "presentation": {
+    "width": 1080,
+    "height": 2400,
+    "duration_ms": 8000,
+    "media": {
+      "path": "guicc-001.mp4",
+      "bytes": 1417421,
+      "sha256": "d00eb3d0197ef6f9633da61daa0831c2b0dc3e96980aaf1894932605556498e9"
+    },
+    "note": "The public benchmark provides a screenshot sequence rather than continuous video. The eight frames are presented at one frame per second without resizing or cropping. Näky processed the same ordered frames after canonical AV1 conversion."
+  },
+  "output": {
+    "release": "v0.1.0",
+    "release_binary_sha256": "c791889fa5bc3f85a8398dddc0901ff3cf4f9bb84777fe48bf7e1f3c58c33b4a",
+    "stream_id": "guicc-001",
+    "events": {
+      "path": "guicc-001.events.ndjson",
+      "bytes": 109874,
+      "sha256": "0f1a0798d6e649e36003cd804e63c4357745ea69e90b79a3b3d6500da51feeeb"
+    },
+    "state": {
+      "path": "guicc-001.screen.txt",
+      "bytes": 3616,
+      "sha256": "64c17bd122825056fec5b83c09ffccd0716e8892e7bf37094df7bf6f2b260ef4"
+    },
+    "event_count": 365,
+    "event_family_counts": {
+      "activity_observed": 61,
+      "element_appeared": 146,
+      "element_content_changed": 23,
+      "element_disappeared": 92,
+      "element_moved": 42,
+      "snapshot": 1
+    },
+    "structural_sample_times_ms": [
+      0,
+      1000,
+      2000,
+      3000,
+      4000,
+      5000,
+      6000,
+      7000
+    ],
+    "first_event_ms": 0,
+    "last_event_ms": 7000,
+    "generation_note": "Produced by the published Näky v0.1.0 binary from the identified canonical AV1 sequence."
+  }
+}
