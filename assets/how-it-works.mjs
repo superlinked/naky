@@ -1,6 +1,9 @@
 import {
   TYPES,
+  createDistinctValueWriter,
   createFrameCallbackLifecycle,
+  createPresentationClock,
+  createSeekPresentationGuard,
   indexStateBlocks,
   overlayPrimitives,
   parseEventStream,
@@ -55,7 +58,11 @@ const elements = Object.freeze({
 });
 
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const presentedFramesSupported = "requestVideoFrameCallback" in elements.video;
+const presentationClock = createPresentationClock(presentedFramesSupported);
+const seekPresentation = createSeekPresentationGuard(presentedFramesSupported);
 const frameCallbacks = createFrameCallbackLifecycle();
+const setStateStatus = createDistinctValueWriter((value) => { elements.stateStatus.textContent = value; });
 let catalog = [];
 let catalogBySlug = new Map();
 let events = [];
@@ -69,6 +76,7 @@ let durationMs = 0;
 let presentationFrame = null;
 let selectionGeneration = 0;
 let fetchController = null;
+let mediaReady = false;
 
 function exactKeys(value, expected) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -207,67 +215,14 @@ function appendBox(parent, className, box) {
   }));
 }
 
-function boxCenter(box) {
-  return {x: box.x + box.width / 2, y: box.y + box.height / 2};
-}
-
-function appendArrow(parent, className, from, to, marker) {
-  parent.append(svg("line", {
-    class: className,
-    x1: from.x,
-    y1: from.y,
-    x2: to.x,
-    y2: to.y,
-    "marker-end": `url(#${marker})`,
-  }));
-}
-
-function arrowMarker(id, className) {
-  const marker = svg("marker", {
-    id,
-    viewBox: "0 0 8 8",
-    refX: 7,
-    refY: 4,
-    markerWidth: 5,
-    markerHeight: 5,
-    orient: "auto-start-reverse",
-  });
-  marker.append(svg("path", {class: className, d: "M 0 0 L 8 4 L 0 8 z"}));
-  return marker;
-}
-
 function renderOverlay(snapshot) {
   const projection = overlayPrimitives(snapshot);
   elements.overlay.setAttribute("viewBox", `0 0 ${projection.frame.width} ${projection.frame.height}`);
   const fragment = document.createDocumentFragment();
-  const definitions = svg("defs");
-  definitions.append(arrowMarker("change-arrow", "change-arrow-head"));
-  definitions.append(arrowMarker("activity-arrow", "activity-arrow-head"));
-  fragment.append(definitions);
-
   const retainedLayer = svg("g", {class: "retained-layer"});
-  projection.retained.forEach((item) => appendBox(retainedLayer, "element-box", item.box));
+  projection.current.forEach((item) => appendBox(retainedLayer, "element-box", item.box));
+  projection.awaitingRefresh.forEach((item) => appendBox(retainedLayer, "awaiting-refresh-box", item.box));
   fragment.append(retainedLayer);
-
-  const changeLayer = svg("g", {class: "change-layer"});
-  projection.changes.forEach((change) => {
-    appendBox(changeLayer, `change-box is-${change.kind}`, change.box);
-    if (change.kind === "moved") {
-      appendBox(changeLayer, "move-origin", change.from);
-      appendArrow(changeLayer, "change-path", boxCenter(change.from), boxCenter(change.to), "change-arrow");
-    }
-  });
-  fragment.append(changeLayer);
-
-  const activityLayer = svg("g", {class: "activity-layer"});
-  projection.activities.forEach((activity) => {
-    appendBox(activityLayer, `activity-box is-${activity.kind}`, activity.box);
-    if (activity.kind === "region_translated") {
-      const start = boxCenter(activity.box);
-      appendArrow(activityLayer, "activity-path", start, {x: start.x + activity.dx, y: start.y + activity.dy}, "activity-arrow");
-    }
-  });
-  fragment.append(activityLayer);
   elements.overlay.replaceChildren(fragment);
   return projection;
 }
@@ -280,8 +235,13 @@ function setCurrentBlock(block) {
   if (block === selectedBlock) return;
   selectedBlock = block;
   if (block && followPlayhead) {
-    programmaticScrollUntil = performance.now() + (reduceMotion ? 80 : 700);
-    blockNodes.get(block)?.scrollIntoView({block: "center", behavior: reduceMotion ? "auto" : "smooth"});
+    const node = blockNodes.get(block);
+    if (node) {
+      const centered = node.offsetTop - (elements.stateViewport.clientHeight - node.offsetHeight) / 2;
+      const maximum = Math.max(0, elements.stateViewport.scrollHeight - elements.stateViewport.clientHeight);
+      programmaticScrollUntil = performance.now() + 80;
+      elements.stateViewport.scrollTop = Math.max(0, Math.min(maximum, centered));
+    }
   }
 }
 
@@ -290,6 +250,7 @@ function plural(count, singular, pluralForm = `${singular}s`) {
 }
 
 function renderAt(timeMs) {
+  if (!seekPresentation.passiveAllowed()) return;
   const bounded = Math.max(0, Math.min(durationMs, Math.round(timeMs)));
   elements.timeline.value = String(bounded);
   elements.time.value = `${formatTime(bounded)} / ${formatTime(durationMs)}`;
@@ -300,27 +261,80 @@ function renderAt(timeMs) {
   const projection = renderOverlay(snapshot);
   const current = selectTimeGroup(stateBlocks, bounded);
   setCurrentBlock(current);
-  const details = [plural(projection.retained.length, "retained region")];
-  if (projection.changes.length) details.push(plural(projection.changes.length, "recent change"));
-  if (projection.activities.length) details.push(plural(projection.activities.length, "recent activity region"));
+  const retainedCount = projection.current.length + projection.awaitingRefresh.length;
+  const details = [plural(retainedCount, "retained region")];
+  if (projection.awaitingRefreshCount) {
+    details.push(`${plural(projection.awaitingRefreshCount, "observation")} awaiting the next structural sample`);
+  }
   elements.moment.textContent = details.join(" · ");
-  elements.stateStatus.textContent = current ? `State at ${current.frametime.toLocaleString()} ms` : "Before the first observation";
+  if (elements.comparison.dataset.mode === "state") {
+    elements.overlayStatus.textContent = projection.awaitingRefreshCount
+      ? `${plural(projection.awaitingRefreshCount, "observation")} awaiting refresh`
+      : "Current-state overlay";
+  }
+  setStateStatus(current ? `State at ${current.frametime.toLocaleString()} ms` : "Before the first observation");
 }
 
-function currentMediaMs() {
-  return Number.isFinite(elements.video.currentTime) ? Math.round(elements.video.currentTime * 1000) : Number(elements.timeline.value);
+function mediaSeconds() {
+  return Number.isFinite(elements.video.currentTime)
+    ? elements.video.currentTime
+    : Number(elements.timeline.value) / 1000;
+}
+
+function renderPassive() {
+  if (!seekPresentation.passiveAllowed()) return;
+  renderAt(presentationClock.passive(mediaSeconds()));
+}
+
+function renderCurrent() {
+  if (!seekPresentation.passiveAllowed()) return;
+  renderAt(presentationClock.current(mediaSeconds()));
+}
+
+function beginSeekingPresentation(timeMs) {
+  const bounded = Math.max(0, Math.min(durationMs, Math.round(timeMs)));
+  seekPresentation.begin();
+  invalidateFrameLoop();
+  elements.stage.dataset.seeking = "true";
+  elements.overlay.replaceChildren();
+  elements.timeline.value = String(bounded);
+  elements.time.value = `${formatTime(bounded)} / ${formatTime(durationMs)}`;
+  elements.moment.textContent = "Waiting for the selected video frame…";
+  if (elements.comparison.dataset.mode === "state") elements.overlayStatus.textContent = "Waiting for video frame";
+  setStateStatus("Waiting for the selected video frame");
+}
+
+function finishSeekingPresentation() {
+  delete elements.stage.dataset.seeking;
+}
+
+function cancelSeekingPresentation() {
+  seekPresentation.cancel();
+  finishSeekingPresentation();
+}
+
+function handleVideoPause() {
+  invalidateFrameLoop();
+  updatePlayState();
+  if (seekPresentation.paused()) {
+    finishSeekingPresentation();
+    renderCurrent();
+    return;
+  }
+  renderPassive();
 }
 
 function requestFrameLoop() {
   if (elements.video.paused || !events.length) return;
   const generation = selectionGeneration;
-  if ("requestVideoFrameCallback" in elements.video) {
+  if (presentedFramesSupported) {
     frameCallbacks.request(
       (callback) => elements.video.requestVideoFrameCallback(callback),
       (identifier) => elements.video.cancelVideoFrameCallback?.(identifier),
       (_now, metadata) => {
         if (generation !== selectionGeneration) return;
-        renderAt(Math.round(metadata.mediaTime * 1000));
+        if (seekPresentation.presented()) finishSeekingPresentation();
+        renderAt(presentationClock.presented(metadata.mediaTime));
         requestFrameLoop();
       },
     );
@@ -330,7 +344,7 @@ function requestFrameLoop() {
       (identifier) => cancelAnimationFrame(identifier),
       () => {
         if (generation !== selectionGeneration) return;
-        renderAt(currentMediaMs());
+        renderPassive();
         requestFrameLoop();
       },
     );
@@ -399,13 +413,14 @@ function setMode(mode) {
   if (mode === "state") {
     setStateViewportAvailability(true);
     elements.modeExplanation.textContent = "A text model receives the exact state stream on the right. The recording remains visible here only as a reference.";
-    elements.overlayStatus.textContent = "Complete Näky overlay";
+    elements.overlayStatus.textContent = seekPresentation.pending ? "Waiting for video frame" : "Current-state overlay";
   } else {
     setStateViewportAvailability(false);
     elements.modeExplanation.textContent = "In the released comparison, a multimodal reader receives 20 sampled pixel frames. The state stream is not sent.";
     elements.overlayStatus.textContent = "Pixels only";
   }
-  renderAt(currentMediaMs());
+  if (seekPresentation.pending) return;
+  renderPassive();
 }
 
 function setLink(link, href) {
@@ -444,6 +459,9 @@ function setSourceSummary(entry, manifest) {
 
 function clearRecording(entry, generation) {
   invalidateFrameLoop();
+  cancelSeekingPresentation();
+  presentationClock.reset();
+  mediaReady = false;
   elements.video.pause();
   elements.video.removeAttribute("src");
   elements.video.dataset.selectionGeneration = String(generation);
@@ -475,8 +493,9 @@ function clearRecording(entry, generation) {
   setLink(elements.rawState, null);
   setLink(elements.rawEvents, null);
   elements.recordingSummary.textContent = `${entry.title} · Loading authentic output…`;
+  elements.overlayStatus.textContent = elements.comparison.dataset.mode === "pixels" ? "Pixels only" : "Loading overlay";
   elements.moment.textContent = "Loading authentic output…";
-  elements.stateStatus.textContent = "Loading state stream…";
+  setStateStatus("Loading state stream…");
   elements.demoKicker.textContent = "Loading recording, one shared playhead";
   elements.demo.setAttribute("aria-busy", "true");
   updatePlayState();
@@ -517,7 +536,7 @@ function configureRecording(entry, manifest) {
   presentationFrame = {width, height};
   elements.timeline.max = String(durationMs);
   elements.stage.style.setProperty("--frame-ratio", `${width} / ${height}`);
-  elements.stage.style.setProperty("--stage-width", `${width <= height ? Math.min(width, 360) : Math.min(width, 720)}px`);
+  elements.stage.style.setProperty("--stage-width", `${width <= height ? Math.min(width, 320) : Math.min(width, 720)}px`);
   elements.overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
   elements.video.setAttribute("aria-label", `${entry.title} screen recording used to demonstrate Näky`);
   elements.demoKicker.textContent = `${durationLabel(durationMs)}, one shared playhead`;
@@ -575,15 +594,16 @@ async function loadRecording(entry, autoplay = true) {
     configureRecording(entry, manifest);
     renderStateBlocks();
     renderMarkers();
-    renderAt(0);
+    renderAt(presentationClock.current(0));
     elements.video.loop = true;
     const mediaUrl = new URL(demoPath(manifest.presentation.media.path), document.baseURI).href;
     elements.video.dataset.expectedSource = mediaUrl;
     elements.video.src = mediaUrl;
     elements.video.load();
     elements.demo.removeAttribute("aria-busy");
-    const mediaReady = await waitForMediaMetadata(generation);
+    const ready = await waitForMediaMetadata(generation);
     if (generation !== selectionGeneration) return;
+    mediaReady = ready;
     elements.timeline.disabled = false;
     elements.play.disabled = !mediaReady;
     if (!mediaReady) elements.videoError.hidden = false;
@@ -593,8 +613,11 @@ async function loadRecording(entry, autoplay = true) {
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
     if (generation !== selectionGeneration) return;
+    mediaReady = false;
+    cancelSeekingPresentation();
     elements.moment.textContent = "Demo output could not be loaded";
-    elements.stateStatus.textContent = error instanceof Error ? error.message : "Demo output unavailable";
+    elements.overlayStatus.textContent = elements.comparison.dataset.mode === "pixels" ? "Pixels only" : "Overlay unavailable";
+    setStateStatus(error instanceof Error ? error.message : "Demo output unavailable");
     elements.videoError.hidden = false;
     elements.demo.removeAttribute("aria-busy");
     updatePlayState();
@@ -609,39 +632,66 @@ function bindInteractions() {
   elements.modeButtons.forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
   elements.play.addEventListener("click", async () => {
     if (!elements.video.paused) {
-      invalidateFrameLoop();
       elements.video.pause();
       return;
     }
-    if (elements.video.ended || elements.video.currentTime * 1000 >= durationMs - 20) elements.video.currentTime = 0;
+    if (elements.video.ended || elements.video.currentTime * 1000 >= durationMs - 20) {
+      beginSeekingPresentation(0);
+      elements.video.currentTime = 0;
+    }
     try { await elements.video.play(); } catch { updatePlayState(); }
   });
   elements.timeline.addEventListener("input", () => {
     const timeMs = Number(elements.timeline.value);
-    invalidateFrameLoop();
-    if (Number.isFinite(elements.video.duration)) elements.video.currentTime = timeMs / 1000;
-    renderAt(timeMs);
-    requestFrameLoop();
+    if (!mediaReady) {
+      renderAt(presentationClock.current(timeMs / 1000));
+      return;
+    }
+    beginSeekingPresentation(timeMs);
+    elements.video.currentTime = timeMs / 1000;
   });
   elements.video.addEventListener("play", updatePlayState);
-  elements.video.addEventListener("pause", () => { invalidateFrameLoop(); updatePlayState(); renderAt(currentMediaMs()); });
-  elements.video.addEventListener("seeking", invalidateFrameLoop);
-  elements.video.addEventListener("seeked", () => { renderAt(currentMediaMs()); requestFrameLoop(); });
-  elements.video.addEventListener("timeupdate", () => renderAt(currentMediaMs()));
-  elements.video.addEventListener("ended", () => { invalidateFrameLoop(); elements.video.currentTime = 0; renderAt(0); updatePlayState(); });
+  elements.video.addEventListener("pause", handleVideoPause);
+  elements.video.addEventListener("seeking", () => {
+    invalidateFrameLoop();
+    if (mediaReady && !seekPresentation.pending) beginSeekingPresentation(Math.round(mediaSeconds() * 1000));
+  });
+  elements.video.addEventListener("seeked", () => {
+    const playing = !elements.video.paused && !elements.video.ended;
+    if (seekPresentation.seeked(playing)) {
+      finishSeekingPresentation();
+      renderCurrent();
+    }
+    requestFrameLoop();
+  });
+  elements.video.addEventListener("timeupdate", renderPassive);
+  elements.video.addEventListener("ended", () => {
+    invalidateFrameLoop();
+    if (mediaReady) {
+      beginSeekingPresentation(0);
+      elements.video.currentTime = 0;
+    } else {
+      renderAt(presentationClock.current(0));
+    }
+    updatePlayState();
+  });
   elements.video.addEventListener("error", () => {
     if (!elements.video.currentSrc || elements.video.currentSrc !== elements.video.dataset.expectedSource) return;
     invalidateFrameLoop();
+    mediaReady = false;
+    const fallbackTimeMs = Number(elements.timeline.value);
+    cancelSeekingPresentation();
     elements.play.disabled = true;
     elements.timeline.disabled = false;
     elements.videoError.hidden = false;
+    renderAt(presentationClock.current(fallbackTimeMs / 1000));
     updatePlayState();
   });
   elements.stateViewport.addEventListener("scroll", () => {
     if (!followPlayhead || performance.now() < programmaticScrollUntil) return;
     followPlayhead = false;
     elements.follow.hidden = false;
-    elements.stateStatus.textContent = "State follow paused";
+    setStateStatus("State follow paused");
   }, {passive: true});
   elements.follow.addEventListener("click", () => {
     followPlayhead = true;
@@ -652,7 +702,6 @@ function bindInteractions() {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && !elements.video.paused) {
-      invalidateFrameLoop();
       elements.video.pause();
     }
   });
@@ -685,7 +734,7 @@ async function initialize() {
   } catch (error) {
     elements.recordingSummary.textContent = "Recording gallery could not be loaded";
     elements.moment.textContent = "Demo output could not be loaded";
-    elements.stateStatus.textContent = error instanceof Error ? error.message : "Demo output unavailable";
+    setStateStatus(error instanceof Error ? error.message : "Demo output unavailable");
     elements.videoError.hidden = false;
     elements.demo.removeAttribute("aria-busy");
   }

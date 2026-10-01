@@ -223,6 +223,51 @@ export function createPresentationClock(presentedFramesSupported) {
   });
 }
 
+export function createSeekPresentationGuard(presentedFramesSupported) {
+  if (typeof presentedFramesSupported !== "boolean") throw new Error("presented-frame support must be boolean");
+  let phase = "idle";
+  return Object.freeze({
+    get pending() { return phase !== "idle"; },
+    get phase() { return phase; },
+    begin() { phase = "seeking"; },
+    cancel() { phase = "idle"; },
+    passiveAllowed() { return phase === "idle"; },
+    seeked(playing) {
+      if (typeof playing !== "boolean") throw new Error("playing state must be boolean");
+      if (phase !== "seeking") return false;
+      if (presentedFramesSupported && playing) {
+        phase = "awaiting-presented-frame";
+        return false;
+      }
+      phase = "idle";
+      return true;
+    },
+    paused() {
+      if (phase !== "awaiting-presented-frame") return false;
+      phase = "idle";
+      return true;
+    },
+    presented() {
+      const completedSeek = phase === "awaiting-presented-frame";
+      if (completedSeek) phase = "idle";
+      return completedSeek;
+    },
+  });
+}
+
+export function createDistinctValueWriter(write) {
+  if (typeof write !== "function") throw new Error("status writer requires a function");
+  let initialized = false;
+  let previous;
+  return (value) => {
+    if (initialized && Object.is(value, previous)) return false;
+    initialized = true;
+    previous = value;
+    write(value);
+    return true;
+  };
+}
+
 export function createFrameCallbackLifecycle() {
   let generation = 0;
   let pending = null;
@@ -333,41 +378,31 @@ function cloneRect(value) {
 }
 
 /**
- * Project one replay snapshot into the complete set of explanatory SVG marks.
- * IDs remain available in the exact state stream but are deliberately absent
- * here: this projection explains spatial coverage rather than tracker identity.
+ * Project one replay snapshot into current and awaiting-refresh locations.
+ * Tracker details and event history remain available in the exact streams but
+ * are deliberately absent from these location-only presentation primitives.
  */
 export function overlayPrimitives(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || !snapshot.frame) {
     throw new Error("overlay snapshot must contain screen bounds");
   }
-  if (!Array.isArray(snapshot.elements) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.activities)) {
+  if (!Array.isArray(snapshot.elements) || !Array.isArray(snapshot.staleIds)) {
     throw new Error("overlay snapshot collections are invalid");
   }
 
-  const retained = snapshot.elements.map((item) => ({box: cloneRect(item.box)}));
-  const changes = snapshot.changes.map((item) => {
-    const result = {kind: item.kind, box: cloneRect(item.box)};
-    if (item.kind === "moved") {
-      result.from = cloneRect(item.from);
-      result.to = cloneRect(item.to);
-    }
-    return result;
-  });
-  const activities = snapshot.activities.map((item) => {
-    const result = {kind: item.kind, box: cloneRect(item.box)};
-    if (item.kind === "region_translated") {
-      result.dx = item.dx;
-      result.dy = item.dy;
-    }
-    return result;
-  });
+  const staleIds = new Set(snapshot.staleIds);
+  const current = [];
+  const awaitingRefresh = [];
+  for (const item of snapshot.elements) {
+    const primitive = {box: cloneRect(item.box)};
+    (staleIds.has(item.id) ? awaitingRefresh : current).push(primitive);
+  }
 
   return {
     frame: {width: snapshot.frame.width, height: snapshot.frame.height},
-    retained,
-    changes,
-    activities,
+    current,
+    awaitingRefresh,
+    awaitingRefreshCount: awaitingRefresh.length,
   };
 }
 

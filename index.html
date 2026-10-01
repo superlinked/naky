@@ -26,7 +26,17 @@
       <section class="hero" aria-labelledby="page-title">
         <p class="eyebrow">Screen perception for reasoning models</p>
         <h1 id="page-title">Screen recordings in.<br><span>Structured state out.</span></h1>
-        <p class="lede">Näky turns a screen recording into a chronological text representation: what text was observed, where it was, how it persisted, and when the screen changed.</p>
+        <p class="lede">Näky accepts an AV1 screen recording and produces compact, chronological text for a reasoning model: what text was observed, where it was, what persisted, and when the screen changed. The model can follow a task over time without receiving every frame.</p>
+      </section>
+
+      <section class="reading-guide" aria-labelledby="preserves-title">
+        <p class="section-kicker">From recording to useful context</p>
+        <h2 id="preserves-title">A small, evolving account of the screen.</h2>
+        <div class="fact-grid">
+          <article><span>Input</span><h3>Start with a screen recording</h3><p>Näky reads an AV1 screen recording, whether it captures continuous motion or a timed series of screens.</p></article>
+          <article><span>Output</span><h3>Give the model chronological text</h3><p>Observed text and screen regions become a compact state that records what persists and what changes over time.</p></article>
+          <article><span>Honest boundary</span><h3>Keep pixels for visual detail</h3><p>Appearance, icons, color, fine visual state, and anything OCR misses may remain available only in pixels.</p></article>
+        </div>
       </section>
 
       <section class="demo-shell" aria-labelledby="demo-title">
@@ -61,18 +71,18 @@
                 <span class="pane-number">01</span>
                 <h3 id="screen-title">What the screen shows</h3>
               </div>
-              <span class="pane-tag" id="overlay-status">Complete Näky overlay</span>
+              <span class="pane-tag" id="overlay-status">Current-state overlay</span>
             </div>
             <div class="overlay-legend" aria-label="Overlay legend">
-              <span><i class="legend-retained" aria-hidden="true"></i>Retained element</span>
-              <span><i class="legend-change" aria-hidden="true"></i>Recent change</span>
-              <span><i class="legend-activity" aria-hidden="true"></i>Observed activity</span>
+              <span><i class="legend-retained" aria-hidden="true"></i>Current retained observation</span>
+              <span><i class="legend-awaiting" aria-hidden="true"></i>Awaiting structural refresh</span>
+              <span>Activity and history remain in the exact state stream</span>
             </div>
             <div class="phone-stage" id="phone-stage">
               <video id="demo-video" muted playsinline preload="auto" aria-label="Screen recording used to demonstrate Näky">
-                Your browser cannot play the selected demo video. <a id="video-fallback-download" href="demo/ios-330.mp4">Download the MP4</a>.
+                Your browser cannot play the selected demo video. <a id="video-fallback-download" href="demo/guicc-001.mp4">Download the MP4</a>.
               </video>
-              <svg id="overlay" class="overlay" viewBox="0 0 304 640" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <svg id="overlay" class="overlay" viewBox="0 0 1080 2400" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="screen-caption"><span class="status-dot" aria-hidden="true"></span><span id="moment-label">Loading authentic output…</span></div>
             </div>
             <div class="playback-controls">
@@ -81,12 +91,12 @@
                 <span id="play-label">Play</span>
               </button>
               <div class="timeline-wrap">
-                <input id="timeline" type="range" min="0" max="13299" value="0" step="1" aria-label="Recording position" disabled>
+                <input id="timeline" type="range" min="0" max="8000" value="0" step="1" aria-label="Recording position" disabled>
                 <div id="marker-rail" class="marker-rail" aria-hidden="true"></div>
               </div>
-              <output id="time-output" for="timeline">0:00 / 0:13</output>
+              <output id="time-output" for="timeline">0:00 / 0:08</output>
             </div>
-            <p id="video-error" class="asset-error" hidden>Video playback is unavailable, but the timeline and state stream remain inspectable. <a id="video-download" href="demo/ios-330.mp4">Download the selected source MP4.</a></p>
+            <p id="video-error" class="asset-error" hidden>Video playback is unavailable, but the timeline and state stream remain inspectable. <a id="video-download" href="demo/guicc-001.mp4">Download the selected source MP4.</a></p>
           </article>
 
           <article class="state-column" aria-labelledby="state-title">
@@ -95,7 +105,7 @@
                 <span class="pane-number">02</span>
                 <h3 id="state-title">What the model receives</h3>
               </div>
-              <span class="raw-links"><a class="raw-link" id="raw-events-link" href="demo/ios-330.events.ndjson">Events</a><a class="raw-link" id="raw-state-link" href="demo/ios-330.screen.txt">Raw state</a></span>
+              <span class="raw-links"><a class="raw-link" id="raw-events-link" href="demo/guicc-001.events.ndjson">Events</a><a class="raw-link" id="raw-state-link" href="demo/guicc-001.screen.txt">Raw state</a></span>
             </div>
             <div class="grammar" aria-label="State syntax legend">
               <span><b>@</b> time</span><span><b>S</b> screen</span><span><b>= + ~ &gt; −</b> set · add · change · move · remove</span><span><b>!</b> observed activity</span>
@@ -112,18 +122,8 @@
         </div>
 
         <noscript>
-          <p class="noscript">JavaScript synchronizes and switches the recordings, overlays, and text. The <a href="demo/gallery.json">public demo catalog</a> links each closed manifest; you can also open the default <a href="demo/ios-330.screen.txt">exact state stream</a>, <a href="demo/ios-330.events.ndjson">ScreenEvents</a>, or <a href="demo/ios-330.mp4">recording</a>.</p>
+          <p class="noscript">JavaScript synchronizes and switches the recordings, overlays, and text. The <a href="demo/gallery.json">public demo catalog</a> links each closed manifest; you can also open the default <a href="demo/guicc-001.screen.txt">exact state stream</a>, <a href="demo/guicc-001.events.ndjson">ScreenEvents</a>, or <a href="demo/guicc-001.mp4">recording</a>.</p>
         </noscript>
-      </section>
-
-      <section class="reading-guide" aria-labelledby="preserves-title">
-        <p class="section-kicker">What survives the conversion</p>
-        <h2 id="preserves-title">A screen becomes a small, evolving document.</h2>
-        <div class="fact-grid">
-          <article><span>Identity + geometry</span><h3>Text stays anchored</h3><p>Stable IDs associate OCR observations across time. Boxes keep each observation tied to its screen position.</p></article>
-          <article><span>Time-ordered deltas</span><h3>Change stays explicit</h3><p>Additions, edits, moves, removals, and observed visual activity update the state instead of repeating every frame.</p></article>
-          <article><span>Honest boundaries</span><h3>Pixels still know more</h3><p>Appearance, icons, color, fine visual state, and anything OCR misses may remain available only in pixels.</p></article>
-        </div>
       </section>
 
       <section class="limits" aria-labelledby="limits-title">
@@ -133,7 +133,7 @@
         </div>
         <div class="limits-copy">
           <p>OCR-derived text and boxes are observations and can be wrong. Geometry and stable IDs show what Näky associated over time.</p>
-          <p>The overlay draws every element retained at the playhead, every recent structural change, and every displayed activity region. Anything extraction did not retain remains visible only in the pixels.</p>
+          <p>The live overlay is a clean view of retained observations, not event history. After reported activity, a region awaiting the next structural sample remains location-visible as a faint neutral outline and is counted with the recording; the exact state and raw streams remain unchanged.</p>
           <p>Visual activity means pixels changed in a region during an interval. It is not a click, scroll, focus, selection, action, intent, or cause label.</p>
           <p>The released comparison found higher quality from screenshots. Näky scored <strong>82.61%</strong> versus <strong>88.21%</strong> for screenshots across 3,468 tasks, while using <strong>50.91% fewer</strong> logical three-trial input tokens and an estimated <strong>46.50% lower</strong> cache-aware reader cost. <a href="evals/gui-world.html">Read the full matched comparison.</a></p>
         </div>

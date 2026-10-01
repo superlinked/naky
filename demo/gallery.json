@@ -2,16 +2,10 @@
   "schema_version": "naky.public-demo-gallery.v1",
   "recordings": [
     {
-      "slug": "ios-330",
-      "title": "GUI-World — iOS",
-      "subtitle": "A native mobile screen recording",
-      "manifest": "ios-330.manifest.json"
-    },
-    {
-      "slug": "xr-38",
-      "title": "GUI-World — spatial interface",
-      "subtitle": "A native landscape XR recording",
-      "manifest": "xr-38.manifest.json"
+      "slug": "guicc-001",
+      "title": "GUI-CC — Android",
+      "subtitle": "An eight-frame benchmark sequence shown at one frame per second",
+      "manifest": "guicc-001.manifest.json"
     },
     {
       "slug": "aitw-6456252662470590836",
@@ -20,10 +14,10 @@
       "manifest": "aitw-6456252662470590836.manifest.json"
     },
     {
-      "slug": "guicc-001",
-      "title": "GUI-CC — Android",
-      "subtitle": "An 8-frame cross-app benchmark sequence",
-      "manifest": "guicc-001.manifest.json"
+      "slug": "ios-330",
+      "title": "GUI-World — iOS",
+      "subtitle": "A native mobile screen recording",
+      "manifest": "ios-330.manifest.json"
     }
   ]
 }
